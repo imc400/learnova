@@ -1,0 +1,143 @@
+"use client";
+
+import { useState } from "react";
+import { Check, X, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  gradeQuizAction,
+  type GradeResult,
+} from "@/server/actions/quiz";
+
+interface QuizQuestion {
+  id: string;
+  type: "single" | "multiple" | "open";
+  prompt: string;
+  options: { id: string; text: string }[];
+}
+
+export function Quiz({
+  quizId,
+  questions,
+}: {
+  quizId: string;
+  questions: QuizQuestion[];
+}) {
+  const [answers, setAnswers] = useState<Record<string, string[]>>({});
+  const [result, setResult] = useState<GradeResult | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function toggle(qId: string, optId: string, multiple: boolean) {
+    setAnswers((prev) => {
+      const cur = prev[qId] ?? [];
+      if (multiple) {
+        return {
+          ...prev,
+          [qId]: cur.includes(optId)
+            ? cur.filter((x) => x !== optId)
+            : [...cur, optId],
+        };
+      }
+      return { ...prev, [qId]: [optId] };
+    });
+  }
+
+  async function submit() {
+    setLoading(true);
+    try {
+      setResult(await gradeQuizAction(quizId, answers));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const resultByQ = new Map(result?.results.map((r) => [r.questionId, r]));
+
+  return (
+    <div className="flex flex-col gap-6">
+      {result && (
+        <div
+          className={`rounded-md px-4 py-3 text-sm font-medium ${
+            result.passed
+              ? "bg-primary/10 text-primary"
+              : "bg-accent/15 text-accent-foreground"
+          }`}
+        >
+          Obtuviste {Math.round(result.score * 100)}%.{" "}
+          {result.passed ? "¡Aprobado! 🎉" : "Repasa y vuelve a intentarlo."}
+        </div>
+      )}
+
+      {questions.map((q, qi) => {
+        const r = resultByQ.get(q.id);
+        return (
+          <div key={q.id} className="rounded-md border border-border bg-card p-4">
+            <p className="font-medium">
+              {qi + 1}. {q.prompt}
+            </p>
+
+            {q.type === "open" ? (
+              <textarea
+                rows={3}
+                disabled={!!result}
+                onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: [e.target.value] }))}
+                className="mt-3 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none"
+                placeholder="Escribe tu respuesta…"
+              />
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {q.options.map((opt) => {
+                  const selected = (answers[q.id] ?? []).includes(opt.id);
+                  const isCorrect = r?.correctOptionIds.includes(opt.id);
+                  return (
+                    <li key={opt.id}>
+                      <label
+                        className={`flex cursor-pointer items-center gap-3 rounded-sm border px-3 py-2.5 text-sm transition-colors ${
+                          result
+                            ? isCorrect
+                              ? "border-primary/50 bg-primary/5"
+                              : selected
+                                ? "border-destructive/50 bg-destructive/5"
+                                : "border-border"
+                            : selected
+                              ? "border-primary bg-primary/5"
+                              : "border-border hover:bg-muted"
+                        }`}
+                      >
+                        <input
+                          type={q.type === "multiple" ? "checkbox" : "radio"}
+                          name={q.id}
+                          checked={selected}
+                          disabled={!!result}
+                          onChange={() => toggle(q.id, opt.id, q.type === "multiple")}
+                          className="accent-primary"
+                        />
+                        <span className="flex-1">{opt.text}</span>
+                        {result && isCorrect && <Check className="size-4 text-primary" />}
+                        {result && selected && !isCorrect && (
+                          <X className="size-4 text-destructive" />
+                        )}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {r && r.explanation && (
+              <p className="mt-3 rounded-sm bg-muted px-3 py-2 text-sm text-muted-foreground">
+                {r.explanation}
+              </p>
+            )}
+          </div>
+        );
+      })}
+
+      {!result && (
+        <Button onClick={submit} disabled={loading} className="self-start">
+          {loading && <Loader2 className="size-4 animate-spin" />}
+          Revisar respuestas
+        </Button>
+      )}
+    </div>
+  );
+}

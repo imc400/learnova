@@ -1,0 +1,41 @@
+# dependencias
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+
+# build / next
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# producción
+/dist
+
+# variables de entorno (NUNCA commitear las reales)
+.env
+.env*.local
+.env.production
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor / OS
+.DS_Store
+*.pem
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# drizzle
+/drizzle/meta
+
+# trigger.dev
+.trigger/
+
+# vercel
+.vercel
