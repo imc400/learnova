@@ -52,7 +52,7 @@ export async function generatePathSkeleton(
             : "",
           `- Idioma de salida: ${intake.language}`,
           "",
-          "Devuelve 5–10 módulos, cada uno con 3–6 lecciones. Títulos de lección específicos y accionables.",
+          "Devuelve EXACTAMENTE 5–7 módulos, cada uno con 3–4 lecciones (MÁXIMO ~24 lecciones en total). Currículum enfocado y de alta calidad, NO exhaustivo: prioriza lo esencial para lograr la meta. Títulos de lección específicos y accionables.",
         ]
           .filter(Boolean)
           .join("\n"),

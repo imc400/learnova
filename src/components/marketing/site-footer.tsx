@@ -30,11 +30,33 @@ export function SiteFooter() {
         </div>
       </div>
       <div className="border-t border-border">
-        <div className="container-page flex h-14 items-center justify-between text-xs text-muted-foreground">
+        <div className="container-page py-4 text-xs leading-relaxed text-muted-foreground">
+          Los videos se muestran mediante los Servicios de la API de YouTube. Al
+          usar Learnova aceptas los{" "}
+          <a
+            href="https://www.youtube.com/t/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            Términos de Servicio de YouTube
+          </a>{" "}
+          y la{" "}
+          <a
+            href="https://policies.google.com/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            Política de Privacidad de Google
+          </a>
+          .
+        </div>
+        <div className="container-page flex h-14 items-center justify-between border-t border-border/50 text-xs text-muted-foreground">
           <span>© {site.name}. Hecho en LatAm.</span>
           <div className="flex gap-4">
-            <Link href="#" className="hover:text-foreground">Términos</Link>
-            <Link href="#" className="hover:text-foreground">Privacidad</Link>
+            <Link href="/terminos" className="hover:text-foreground">Términos</Link>
+            <Link href="/privacidad" className="hover:text-foreground">Privacidad</Link>
           </div>
         </div>
       </div>

@@ -44,6 +44,33 @@ export default async function AppLayout({
         </div>
       </header>
       <main className="container-page py-8">{children}</main>
+      <footer className="border-t border-border">
+        <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-1 py-4 text-xs text-muted-foreground">
+          <span>© Learnova</span>
+          <Link href="/terminos" className="hover:text-foreground">
+            Términos
+          </Link>
+          <Link href="/privacidad" className="hover:text-foreground">
+            Privacidad
+          </Link>
+          <a
+            href="https://www.youtube.com/t/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground"
+          >
+            Términos de YouTube
+          </a>
+          <a
+            href="https://policies.google.com/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-foreground"
+          >
+            Privacidad de Google
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }

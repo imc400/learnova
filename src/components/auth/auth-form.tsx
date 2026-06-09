@@ -20,6 +20,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [language, setLanguage] = useState("es");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(
@@ -41,7 +42,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           email,
           password,
           options: {
-            data: { full_name: fullName },
+            data: { full_name: fullName, preferred_language: language },
             emailRedirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`,
           },
         });
@@ -110,6 +111,25 @@ export function AuthForm({ mode }: { mode: Mode }) {
               autoComplete="name"
               required
             />
+          </div>
+        )}
+        {mode === "signup" && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="language">Idioma de tu cuenta</Label>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="h-10 rounded-md border border-input bg-card px-3 text-sm text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              <option value="es">Español</option>
+              <option value="en">English</option>
+              <option value="pt">Português</option>
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Generaremos tus rutas, lecciones y videos en este idioma. Podrás
+              cambiarlo en cada ruta.
+            </p>
           </div>
         )}
         <div className="flex flex-col gap-1.5">

@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { learningPaths, modules, lessons, videoCandidates } from "@/db/schema";
 
@@ -55,6 +55,8 @@ export async function getPathTree(pathId: string, userId: string) {
           and(
             inArray(videoCandidates.lessonId, lessonIds),
             eq(videoCandidates.isActive, true),
+            // Cumplimiento YouTube: nunca servir metadatos sin verificar o con > 30 días.
+            gt(videoCandidates.lastCheckedAt, sql`now() - interval '30 days'`),
           ),
         )
         .orderBy(asc(videoCandidates.rank))

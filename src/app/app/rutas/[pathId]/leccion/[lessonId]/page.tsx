@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { ArrowLeft, CheckCircle2, Lightbulb, ListChecks } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Lightbulb,
+  ListChecks,
+  Loader2,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getLessonDetail } from "@/server/queries/lessons";
 import { completeLessonAction } from "@/server/actions/quiz";
+import { RouteProgressLive } from "@/components/app/route-progress-live";
 import { YouTubeEmbed } from "@/components/app/youtube-embed";
 import { Quiz } from "@/components/app/quiz";
 import { TutorChat } from "@/components/app/tutor-chat";
@@ -73,7 +80,10 @@ export default async function LessonPage({
         {/* Video curado */}
         {detail.videos.length > 0 && (
           <div className="mt-6">
-            <YouTubeEmbed videos={detail.videos} />
+            <YouTubeEmbed
+              videos={detail.videos}
+              userLanguage={detail.path.language}
+            />
           </div>
         )}
 
@@ -116,9 +126,18 @@ export default async function LessonPage({
             )}
           </div>
         ) : (
-          <p className="mt-8 text-muted-foreground">
-            El contenido de esta lección aún se está generando.
-          </p>
+          <div className="mt-8 rounded-lg border border-border bg-card p-8 text-center">
+            <Loader2 className="mx-auto size-7 animate-spin text-primary" />
+            <p className="mt-3 text-sm font-medium">
+              Esta lección se está generando…
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Aparecerá aquí en cuanto esté lista (unos segundos). No necesitas
+              recargar.
+            </p>
+            {/* Auto-refresca la página hasta que llegue el contenido. */}
+            <RouteProgressLive pathId={pathId} showBanner={false} />
+          </div>
         )}
 
         {/* Quiz */}

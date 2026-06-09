@@ -12,11 +12,12 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, full_name, avatar_url)
+  insert into public.profiles (id, full_name, avatar_url, locale)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name'),
-    new.raw_user_meta_data->>'avatar_url'
+    new.raw_user_meta_data->>'avatar_url',
+    coalesce(new.raw_user_meta_data->>'preferred_language', 'es')
   )
   on conflict (id) do nothing;
 
@@ -48,6 +49,7 @@ alter table public.tutor_messages      enable row level security;
 alter table public.subscriptions       enable row level security;
 alter table public.path_purchases      enable row level security;
 alter table public.skeleton_cache      enable row level security; -- sin policy pública: solo service_role
+alter table public.youtube_search_cache enable row level security; -- sin policy pública: solo service_role
 
 -- 3) Políticas — el dueño (auth.uid()) puede ver/editar lo suyo
 --    (el service_role del servidor bypassa RLS para el pipeline de generación)
@@ -141,3 +143,17 @@ create policy "subs_read_owner" on public.subscriptions
 drop policy if exists "purchases_read_owner" on public.path_purchases;
 create policy "purchases_read_owner" on public.path_purchases
   for select using (user_id = auth.uid());
+
+-- 4) Realtime: publicar learning_paths para que el progreso de generación
+--    llegue al navegador en vivo (postgres_changes). Idempotente.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'learning_paths'
+  ) then
+    alter publication supabase_realtime add table public.learning_paths;
+  end if;
+end $$;

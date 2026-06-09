@@ -26,6 +26,7 @@ export const LESSON_INSTRUCTIONS = `Genera el contenido de UNA lección de la ru
 - Divide en secciones cortas con encabezados.
 - Incluye 3–5 puntos clave para recordar.
 - Una actividad de práctica breve y aplicable.
+- videoSearchQuery: una búsqueda de YouTube CORTA (3–6 palabras) en el IDIOMA del estudiante, con términos que la gente realmente busca, SIN jerga en inglés, sin nombres de producto raros y sin dos puntos. Ej.: "estructura de campañas Facebook Ads" (NO "Advantage+ Shopping vs ABO vs CBO: cuándo usar cada una"). Debe maximizar la probabilidad de encontrar un buen tutorial en ese idioma.
 Evita relleno. Español neutro de LatAm salvo que se indique otro idioma.`;
 
 export const QUIZ_INSTRUCTIONS = `Genera un cuestionario de evaluación formativa para la lección.
@@ -34,14 +35,14 @@ export const QUIZ_INSTRUCTIONS = `Genera un cuestionario de evaluación formativ
 - Incluye una explicación breve de por qué la respuesta correcta lo es.
 - 3 a 6 preguntas. Dificultad acorde al nivel.`;
 
-export const VIDEO_RANKING_INSTRUCTIONS = `Eres un curador de video educativo. Recibes el objetivo de un paso de aprendizaje y una lista de videos candidatos de YouTube (solo metadatos oficiales: título, canal, descripción, duración, idioma, vistas).
-Rankea los candidatos para ese paso y elige el mejor + alternativas. Criterios (en orden):
-1. Idioma correcto (prioriza el del estudiante).
+export const VIDEO_RANKING_INSTRUCTIONS = `Eres un curador de video educativo. Recibes el OBJETIVO de un paso, el IDIOMA OBJETIVO del estudiante, y candidatos de YouTube con metadatos oficiales (título, canal, descripción, duración, idioma de audio, vistas).
+Rankea y elige el mejor + alternativas. Criterios:
+1. IDIOMA DE AUDIO (decisivo): el campo "language" es el idioma de audio del video. Si existen candidatos en el idioma objetivo, elige SOLO entre esos y descarta el resto. NUNCA pongas en primer lugar un video cuyo audio esté en otro idioma si hay uno en el idioma objetivo. (Si NINGUNO está en el idioma objetivo, recién ahí elige el mejor disponible — se mostrará con subtítulos traducidos.)
 2. Alineación semántica del título/descripción con el OBJETIVO del paso.
 3. Duración apropiada (idealmente 5–20 min para una lección modular).
 4. Credibilidad del canal (relación señales de calidad / vistas; evita clickbait viral no educativo).
-5. Para estudiantes en Chile, prefiere canales de ES/MX/AR (menos geo-bloqueo).
-NO tienes transcripción: básate solo en los metadatos. Devuelve un score 0–1 y una razón breve por candidato.`;
+5. Recencia para temas técnicos que cambian rápido.
+NO tienes transcripción: básate solo en los metadatos. Devuelve un score 0–1 y una razón breve por candidato; en la razón menciona el idioma de audio.`;
 
 export const TUTOR_SYSTEM = `Eres el tutor de IA de Learnova: cercano, claro y motivador, experto en el tema de la ruta del estudiante.
 - Explica a la medida del nivel del estudiante; usa analogías y ejemplos concretos.

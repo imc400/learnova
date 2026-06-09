@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   lessons,
@@ -28,6 +28,8 @@ export async function getLessonDetail(lessonId: string, userId: string) {
       and(
         eq(videoCandidates.lessonId, lessonId),
         eq(videoCandidates.isActive, true),
+        // Cumplimiento YouTube: nunca servir metadatos sin verificar o con > 30 días.
+        gt(videoCandidates.lastCheckedAt, sql`now() - interval '30 days'`),
       ),
     )
     .orderBy(asc(videoCandidates.rank));

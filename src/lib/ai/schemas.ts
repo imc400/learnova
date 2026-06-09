@@ -41,7 +41,11 @@ export const lessonContentSchema = z.object({
   keyTakeaways: z.array(z.string()),
   practice: z.string(),
   /** Query óptima para buscar el video de apoyo en YouTube. */
-  videoSearchQuery: z.string(),
+  videoSearchQuery: z
+    .string()
+    .describe(
+      "Búsqueda de YouTube CORTA (3-6 palabras) en el idioma del estudiante, sin jerga en inglés ni signos de puntuación, optimizada para encontrar un buen tutorial en ese idioma.",
+    ),
 });
 export type LessonContent = z.infer<typeof lessonContentSchema>;
 

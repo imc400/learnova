@@ -34,9 +34,10 @@ export async function searchVideos(
     type: "video",
     q: query,
     maxResults: String(opts.maxResults ?? 15),
-    relevanceLanguage: opts.language ?? "es",
+    relevanceLanguage: (opts.language ?? "es").slice(0, 2),
     videoEmbeddable: "true", // solo videos que permiten embedding
     safeSearch: "moderate",
+    fields: "items(id/videoId)", // minimización: solo el ID que usamos
     key: key(),
   });
 
@@ -62,6 +63,9 @@ export async function getVideoDetails(
   const params = new URLSearchParams({
     part: "snippet,contentDetails,statistics",
     id: ids.slice(0, 50).join(","),
+    // minimización: solo los campos que usamos
+    fields:
+      "items(id,snippet(title,description,channelTitle,publishedAt,defaultLanguage,defaultAudioLanguage),contentDetails(duration,caption),statistics(viewCount,likeCount))",
     key: key(),
   });
 

@@ -6,6 +6,54 @@ import { VIDEO_RANKING_INSTRUCTIONS } from "@/lib/ai/prompts";
 import { videoRankingSchema } from "@/lib/ai/schemas";
 import { searchVideos, getVideoDetails } from "./client";
 import type { CuratedVideo } from "./types";
+import { eq, sql } from "drizzle-orm";
+import { db } from "@/db";
+import { youtubeSearchCache } from "@/db/schema";
+
+const SEARCH_CACHE_TTL_MS = 21 * 24 * 60 * 60 * 1000; // 21 días
+
+/**
+ * Búsqueda en YouTube con CACHÉ (conserva cuota: search.list = 100 unidades).
+ * Cachea los IDs por (query normalizada + idioma). Las políticas de YouTube
+ * permiten almacenar IDs a largo plazo; el TTL es solo para frescura.
+ */
+async function cachedSearchIds(
+  query: string,
+  language: string,
+  force = false,
+): Promise<string[]> {
+  const lang = (language || "es").slice(0, 2).toLowerCase();
+  const cacheKey = `${query.toLowerCase().trim().replace(/\s+/g, " ")}::${lang}`;
+  const [hit] = await db
+    .select()
+    .from(youtubeSearchCache)
+    .where(eq(youtubeSearchCache.cacheKey, cacheKey))
+    .limit(1);
+  if (
+    !force &&
+    hit &&
+    Array.isArray(hit.videoIds) &&
+    hit.videoIds.length &&
+    Date.now() - hit.updatedAt.getTime() < SEARCH_CACHE_TTL_MS
+  ) {
+    await db
+      .update(youtubeSearchCache)
+      .set({ timesReused: sql`${youtubeSearchCache.timesReused} + 1` })
+      .where(eq(youtubeSearchCache.id, hit.id));
+    return hit.videoIds;
+  }
+  const ids = await searchVideos(query, { maxResults: 15, language });
+  if (ids.length) {
+    await db
+      .insert(youtubeSearchCache)
+      .values({ cacheKey, query, language: lang, videoIds: ids })
+      .onConflictDoUpdate({
+        target: youtubeSearchCache.cacheKey,
+        set: { videoIds: ids, updatedAt: new Date() },
+      });
+  }
+  return ids;
+}
 
 /**
  * Cura el mejor video de YouTube para un paso de la ruta + alternativas.
@@ -20,12 +68,46 @@ export async function curateVideoForLesson(args: {
 }): Promise<CuratedVideo[]> {
   const keep = args.keep ?? 3;
 
-  const ids = await searchVideos(args.query, {
-    maxResults: 15,
-    language: args.language,
-  });
-  const candidates = await getVideoDetails(ids);
-  if (candidates.length === 0) return [];
+  const target = (args.language || "es").slice(0, 2).toLowerCase();
+
+  // Sesgar la búsqueda al idioma objetivo: un hint ("en español") surfacea
+  // contenido en ese idioma aunque la query traiga jerga en inglés (CAPI, ABO…).
+  // Si la query con hint no devuelve nada (frase rara), reintentamos sin hint.
+  const HINTS: Record<string, string> = {
+    es: "en español",
+    pt: "em português",
+    fr: "en français",
+    it: "in italiano",
+    de: "auf Deutsch",
+  };
+  const hint = HINTS[target];
+  let ids = await cachedSearchIds(
+    hint ? `${args.query} ${hint}` : args.query,
+    args.language,
+  );
+  let allCandidates = await getVideoDetails(ids);
+  if (allCandidates.length === 0) {
+    // La query con hint no dio nada, o la caché devolvió IDs ya caídos:
+    // fuerza una búsqueda fresca (sin caché) con la query base.
+    ids = await cachedSearchIds(args.query, args.language, true);
+    allCandidates = await getVideoDetails(ids);
+  }
+  if (allCandidates.length === 0) return [];
+
+  // --- FILTRO DURO DE IDIOMA ---
+  // defaultLanguage = idioma de AUDIO real reportado por YouTube. Si existen
+  // videos en el idioma del estudiante, descartamos los de otro idioma. Si
+  // NINGUNO coincide (nicho sin contenido en ese idioma), caemos al mejor
+  // disponible y el reproductor mostrará subtítulos traducidos + un aviso.
+  const langOf = (c: (typeof allCandidates)[number]) =>
+    (c.defaultLanguage || "").slice(0, 2).toLowerCase();
+  const matched = allCandidates.filter((c) => langOf(c) === target);
+  const unknown = allCandidates.filter((c) => !c.defaultLanguage);
+  const candidates = matched.length
+    ? [...matched, ...unknown] // hay en el idioma → excluye los de otro idioma
+    : unknown.length
+      ? unknown // sin confirmados, pero hay sin etiqueta → dales la oportunidad
+      : allCandidates; // todo en otro idioma → fallback subtitulado
 
   const client = getAnthropic();
   const res = await client.messages.parse({
@@ -74,7 +156,8 @@ export async function curateVideoForLesson(args: {
         title: c.title,
         channelTitle: c.channelTitle,
         durationSeconds: c.durationSeconds,
-        language: r.language,
+        // Guardamos la señal REAL de YouTube (idioma de audio), no la de Haiku.
+        language: c.defaultLanguage ?? r.language ?? args.language,
         score: r.score,
         reason: r.reason,
         rank: i, // 0 = principal

@@ -90,6 +90,25 @@ export const skeletonCache = pgTable(
   }),
 );
 
+// ---------- Caché de búsquedas de YouTube (conserva cuota de la API) ----------
+export const youtubeSearchCache = pgTable(
+  "youtube_search_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cacheKey: text("cache_key").notNull(), // `${query normalizada}::${idioma}`
+    query: text("query").notNull(),
+    language: text("language").default("es").notNull(),
+    // Solo IDs de video: las políticas de YouTube permiten almacenarlos a largo plazo.
+    videoIds: jsonb("video_ids").$type<string[]>().notNull(),
+    timesReused: integer("times_reused").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    cacheKeyIdx: uniqueIndex("youtube_search_cache_key_idx").on(t.cacheKey),
+  }),
+);
+
 // ---------- Rutas de aprendizaje ----------
 export const learningPaths = pgTable(
   "learning_paths",
@@ -107,6 +126,8 @@ export const learningPaths = pgTable(
     status: pathStatus("status").default("draft").notNull(),
     generationProgress: integer("generation_progress").default(0).notNull(),
     generationStep: text("generation_step"),
+    generationStartedAt: timestamp("generation_started_at", { withTimezone: true }),
+    totalLessons: integer("total_lessons"),
     intake: jsonb("intake"), // respuestas del cuestionario inicial
     skeletonCacheKey: text("skeleton_cache_key"), // de qué esqueleto derivó
     estimatedHours: real("estimated_hours"),

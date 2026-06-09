@@ -1,4 +1,5 @@
 import { Sparkles } from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
 import { createPathAction } from "@/server/actions/paths";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,7 +7,15 @@ import { SubmitButton } from "@/components/app/submit-button";
 
 export const metadata = { title: "Crear ruta" };
 
-export default function CreatePathPage() {
+export default async function CreatePathPage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  // Idioma de la cuenta (elegido en el signup) → preseleccionado, editable aquí.
+  const defaultLang = (
+    (user?.user_metadata?.preferred_language as string | undefined) ?? "es"
+  ).slice(0, 2);
   return (
     <div className="mx-auto max-w-xl">
       <div className="text-center">
@@ -42,6 +51,20 @@ export default function CreatePathPage() {
             placeholder="Ej: Quiero poder cocinar platos completos para mi familia los fines de semana."
             className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="language">Idioma del contenido y los videos</Label>
+          <select
+            id="language"
+            name="language"
+            defaultValue={defaultLang}
+            className="h-11 rounded-md border border-input bg-card px-3 text-sm text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+          >
+            <option value="es">Español</option>
+            <option value="en">English</option>
+            <option value="pt">Português</option>
+          </select>
         </div>
 
         <div className="grid gap-5 sm:grid-cols-2">

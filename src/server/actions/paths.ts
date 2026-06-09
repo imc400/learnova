@@ -25,7 +25,7 @@ export async function createPathAction(formData: FormData) {
       ? String(formData.get("priorExperience"))
       : undefined,
     weeklyHours: weekly ? Number(weekly) : undefined,
-    language: "es",
+    language: String(formData.get("language") || "es"),
   });
 
   if (!parsed.success) {

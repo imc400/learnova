@@ -1,9 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ChevronRight, Clock, PlayCircle, AlertTriangle } from "lucide-react";
+import {
+  ChevronRight,
+  Clock,
+  PlayCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPathTree } from "@/server/queries/paths";
 import { GeneratingState } from "@/components/app/generating-state";
+import { RouteProgressLive } from "@/components/app/route-progress-live";
 import { Badge } from "@/components/ui/badge";
 
 export default async function PathPage({
@@ -24,7 +32,17 @@ export default async function PathPage({
   if (path.status === "generating") {
     return (
       <div className="mx-auto max-w-2xl">
-        <GeneratingState />
+        <GeneratingState
+          pathId={path.id}
+          initialProgress={path.generationProgress}
+          initialStep={path.generationStep ?? "Iniciando…"}
+          totalLessons={path.totalLessons ?? null}
+          generationStartedAt={
+            path.generationStartedAt
+              ? path.generationStartedAt.toISOString()
+              : null
+          }
+        />
       </div>
     );
   }
@@ -71,6 +89,14 @@ export default async function PathPage({
         </div>
       </div>
 
+      {path.generationProgress < 100 && (
+        <RouteProgressLive
+          pathId={path.id}
+          initialProgress={path.generationProgress}
+          totalLessons={path.totalLessons ?? totalLessons}
+        />
+      )}
+
       <div className="mt-8 space-y-6">
         {path.modules.map((m, mi) => (
           <section key={m.id}>
@@ -84,14 +110,24 @@ export default async function PathPage({
               <p className="mt-1 text-sm text-muted-foreground">{m.objective}</p>
             )}
             <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-              {m.lessons.map((l, li) => (
+              {m.lessons.map((l) => (
                 <li key={l.id}>
                   <Link
                     href={`/app/rutas/${path.id}/leccion/${l.id}`}
                     className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted"
                   >
-                    <span className="grid size-7 shrink-0 place-items-center rounded-full border border-border text-xs text-muted-foreground">
-                      {li + 1}
+                    <span
+                      className={`grid size-7 shrink-0 place-items-center rounded-full border text-xs ${
+                        l.content
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border text-muted-foreground"
+                      }`}
+                    >
+                      {l.content ? (
+                        <CheckCircle2 className="size-4" />
+                      ) : (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      )}
                     </span>
                     <span className="flex-1 text-sm font-medium">{l.title}</span>
                     {l.estimatedMinutes ? (
