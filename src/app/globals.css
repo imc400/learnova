@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 /*
-  Sistema de diseño de Aulia.
-  Paleta: teal de confianza (primary) + ámbar cálido (accent) sobre neutros
-  ligeramente cálidos. Evitamos el cliché de gradientes violeta de "AI".
+  Sistema de diseño de Aulia — "Sage & Cream".
+  Verde salvia-esmeralda (cálido, humano) sobre papel crema (no blanco clínico),
+  con ámbar/coral como chispa humana. Display: Fredoka · Texto: Nunito Sans.
 */
 
 @theme inline {
@@ -23,50 +23,50 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
 
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-sora), var(--font-inter), ui-sans-serif, sans-serif;
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-fredoka), var(--font-nunito), ui-sans-serif, sans-serif;
 
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --radius-xl: 1.5rem;
+  --radius-sm: 0.625rem; /* 10px */
+  --radius-md: 0.875rem; /* 14px */
+  --radius-lg: 1.25rem; /* 20px */
+  --radius-xl: 1.75rem; /* 28px */
 
-  --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 8px 24px rgb(15 23 42 / 0.06);
-  --shadow-lift: 0 4px 12px rgb(15 23 42 / 0.08), 0 24px 48px rgb(15 23 42 / 0.10);
+  --shadow-soft: 0 1px 2px rgb(22 38 31 / 0.05), 0 8px 24px rgb(22 38 31 / 0.06);
+  --shadow-lift: 0 4px 14px rgb(22 38 31 / 0.07), 0 24px 48px rgb(14 83 64 / 0.1);
 }
 
 :root {
-  --background: #fbfaf8;
-  --foreground: #0f172a;
+  --background: #faf6ee; /* paper — crema cálido */
+  --foreground: #16261f; /* ink — verde casi negro */
   --card: #ffffff;
-  --card-foreground: #0f172a;
-  --muted: #f1f0ec;
-  --muted-foreground: #5b6472;
-  --primary: #0d9488;
+  --card-foreground: #16261f;
+  --muted: #f3ecdd; /* paper-2 — crema profundo */
+  --muted-foreground: #4c5c53; /* ink-soft */
+  --primary: #1f7a63; /* verde salvia-esmeralda — firma */
   --primary-foreground: #ffffff;
-  --accent: #f59e0b;
-  --accent-foreground: #1c1407;
-  --border: #e7e5df;
-  --input: #e7e5df;
-  --ring: #0d9488;
-  --destructive: #dc2626;
+  --accent: #f2a65a; /* ámbar / sol — chispa humana */
+  --accent-foreground: #16261f;
+  --border: #e6ddcc; /* línea cálida */
+  --input: #e6ddcc;
+  --ring: #1f7a63;
+  --destructive: #c0492f; /* terracota-rojo (cálido) */
   --destructive-foreground: #ffffff;
 }
 
 .dark {
-  --background: #0a0f1a;
-  --foreground: #f1f5f9;
-  --card: #111827;
-  --card-foreground: #f1f5f9;
-  --muted: #1e293b;
-  --muted-foreground: #94a3b8;
-  --primary: #2dd4bf;
-  --primary-foreground: #042f2a;
-  --accent: #fbbf24;
-  --accent-foreground: #1c1407;
-  --border: #1f2a3a;
-  --input: #1f2a3a;
-  --ring: #2dd4bf;
+  --background: #0f1a15; /* verde-ink profundo */
+  --foreground: #f3ecdd; /* crema */
+  --card: #16261f;
+  --card-foreground: #f3ecdd;
+  --muted: #1c2c24;
+  --muted-foreground: #a7b3aa;
+  --primary: #2e9079; /* salvia más vibrante para fondo oscuro */
+  --primary-foreground: #06120d;
+  --accent: #f2a65a;
+  --accent-foreground: #16261f;
+  --border: #243a30;
+  --input: #243a30;
+  --ring: #2e9079;
   --destructive: #ef4444;
   --destructive-foreground: #ffffff;
 }
@@ -85,6 +85,14 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    line-height: 1.55;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
   }
   ::selection {
     background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);

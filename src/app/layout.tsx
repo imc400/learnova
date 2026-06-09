@@ -1,17 +1,20 @@
 import type { Metadata } from "next";
-import { Inter, Sora } from "next/font/google";
+import { Fredoka, Nunito_Sans } from "next/font/google";
 import { site } from "@/lib/site";
 import "./globals.css";
 
-const inter = Inter({
+// Texto (UI/cuerpo): Nunito Sans — humanista, legible, con ñ y acentos.
+const nunito = Nunito_Sans({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-nunito",
   display: "swap",
 });
 
-const sora = Sora({
+// Display (titulares): Fredoka — redondeada, cálida, cercana.
+const fredoka = Fredoka({
   subsets: ["latin"],
-  variable: "--font-sora",
+  variable: "--font-fredoka",
+  weight: ["400", "500", "600", "700"],
   display: "swap",
 });
 
@@ -34,14 +37,13 @@ export const metadata: Metadata = {
     title: `${site.name} — ${site.tagline}`,
     description: site.description,
   },
-  icons: { icon: "/favicon.ico" },
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={`${inter.variable} ${sora.variable}`}>
+    <html lang="es" className={`${nunito.variable} ${fredoka.variable}`}>
       <body>{children}</body>
     </html>
   );
