@@ -1,4 +1,3 @@
-import "server-only";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { getAnthropic, cachedSystem } from "@/lib/ai/client";
 import { MODELS, MAX_TOKENS } from "@/lib/ai/models";

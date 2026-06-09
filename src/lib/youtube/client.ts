@@ -1,4 +1,3 @@
-import "server-only";
 import { env } from "@/lib/env";
 import type { YouTubeCandidate } from "./types";
 
