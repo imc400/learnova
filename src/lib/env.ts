@@ -57,7 +57,12 @@ const clientEnv = {
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
 };
 
-const skip = !!process.env.SKIP_ENV_VALIDATION;
+// No validar durante `next build`: el build NO necesita los secretos de runtime
+// (las páginas con datos son dinámicas). Evita que el deploy se caiga por env y
+// es la práctica recomendada. En runtime SÍ se valida (fail-fast si falta algo).
+const skip =
+  !!process.env.SKIP_ENV_VALIDATION ||
+  process.env.NEXT_PHASE === "phase-production-build";
 
 function parse<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer<T> {
   if (skip) return data as z.infer<T>;
