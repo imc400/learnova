@@ -6,6 +6,7 @@ import {
   integer,
   boolean,
   timestamp,
+  date,
   jsonb,
   real,
   uniqueIndex,
@@ -58,6 +59,34 @@ export const paymentStatus = pgEnum("payment_status", [
   "failed",
   "refunded",
 ]);
+export const xpSource = pgEnum("xp_source", [
+  "lesson_completed",
+  "quiz_passed",
+  "quiz_perfect",
+  "module_completed",
+  "path_completed",
+  "achievement",
+]);
+export const achievementKind = pgEnum("achievement_kind", [
+  "deterministic",
+  "surprise",
+]);
+export const emailType = pgEnum("email_type", [
+  "welcome",
+  "module_ready",
+  "module_learned",
+  "path_completed",
+  "streak_at_risk",
+  "weekly_recap",
+  "reengagement",
+]);
+export const outboxStatus = pgEnum("outbox_status", [
+  "pending",
+  "claimed",
+  "sent",
+  "skipped",
+  "failed",
+]);
 
 // ---------- Perfiles ----------
 export const profiles = pgTable("profiles", {
@@ -66,6 +95,15 @@ export const profiles = pgTable("profiles", {
   avatarUrl: text("avatar_url"),
   locale: text("locale").default("es-CL").notNull(),
   onboardingCompleted: boolean("onboarding_completed").default(false).notNull(),
+  // Gamificación (agregados; la verdad granular vive en xp_events).
+  totalXp: integer("total_xp").default(0).notNull(),
+  level: integer("level").default(1).notNull(),
+  currentStreak: integer("current_streak").default(0).notNull(),
+  longestStreak: integer("longest_streak").default(0).notNull(),
+  lastActiveDay: date("last_active_day"), // día (TZ del usuario) de la última actividad
+  streakFreezes: integer("streak_freezes").default(2).notNull(), // perdón de racha
+  // Email: copiado desde auth.users por handle_new_user (evita leer auth.* en cada envío).
+  email: text("email"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -277,23 +315,169 @@ export const progress = pgTable(
       t.userId,
       t.lessonId,
     ),
+    lessonIdx: index("progress_lesson_idx").on(t.lessonId), // cascadas de borrado
+    pathUserIdx: index("progress_path_user_idx").on(t.pathId, t.userId), // conteos por ruta
   }),
 );
 
-export const quizAttempts = pgTable("quiz_attempts", {
-  id: uuid("id").primaryKey().defaultRandom(),
+export const quizAttempts = pgTable(
+  "quiz_attempts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    quizId: uuid("quiz_id")
+      .references(() => quizzes.id, { onDelete: "cascade" })
+      .notNull(),
+    answers: jsonb("answers"),
+    score: real("score"),
+    passed: boolean("passed").default(false).notNull(),
+    feedback: jsonb("feedback"), // corrección por pregunta (Haiku)
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("quiz_attempts_user_idx").on(t.userId), // contadores de logros
+    quizIdx: index("quiz_attempts_quiz_idx").on(t.quizId), // cascadas de borrado
+  }),
+);
+
+// ---------- Gamificación ----------
+// Ledger append-only de XP. El índice único (user, source, ref) es la garantía
+// de idempotencia: recompletar una lección o reaprobar un quiz no duplica XP
+// (clave porque Trigger.dev y los reintentos de actions son at-least-once).
+export const xpEvents = pgTable(
+  "xp_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    source: xpSource("source").notNull(),
+    refId: uuid("ref_id").notNull(), // lessonId / quizId / moduleId / pathId / achievementId
+    points: integer("points").notNull(),
+    weekStart: date("week_start").notNull(), // lunes de la semana (para ligas/recaps)
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqSourceRef: uniqueIndex("xp_events_user_source_ref_idx").on(
+      t.userId,
+      t.source,
+      t.refId,
+    ),
+    userWeekIdx: index("xp_events_user_week_idx").on(t.userId, t.weekStart),
+  }),
+);
+
+// Catálogo de logros (semilla en la migración). Pocos y significativos.
+export const achievements = pgTable(
+  "achievements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(), // p.ej. "first_lesson", "streak_7"
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    icon: text("icon").notNull(), // nombre de ícono lucide
+    kind: achievementKind("kind").default("deterministic").notNull(),
+    xpReward: integer("xp_reward").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({ codeUniq: uniqueIndex("achievements_code_idx").on(t.code) }),
+);
+
+export const userAchievements = pgTable(
+  "user_achievements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    achievementId: uuid("achievement_id")
+      .references(() => achievements.id, { onDelete: "cascade" })
+      .notNull(),
+    unlockedAt: timestamp("unlocked_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqUserAch: uniqueIndex("user_achievements_user_ach_idx").on(
+      t.userId,
+      t.achievementId,
+    ),
+  }),
+);
+
+// ---------- Motor de correos por avance ----------
+// Outbox transaccional + cola idempotente. Se inserta en la MISMA transacción
+// que el progreso (sin dual-write); UNIQUE(user,type,dedupe) hace que los
+// reintentos at-least-once de Trigger.dev resulten en effectively-once.
+export const emailOutbox = pgTable(
+  "email_outbox",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    type: emailType("type").notNull(),
+    dedupeKey: text("dedupe_key").notNull(), // moduleId/pathId/semana-ISO/fecha
+    payload: jsonb("payload"), // contexto crudo del avance (ids+títulos+scores), NO el cuerpo
+    status: outboxStatus("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    lastError: text("last_error"),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqDedupe: uniqueIndex("email_outbox_user_type_dedupe_idx").on(
+      t.userId,
+      t.type,
+      t.dedupeKey,
+    ),
+    statusIdx: index("email_outbox_status_idx").on(t.status, t.createdAt),
+  }),
+);
+
+// Preferencias y opt-out granular (CAN-SPAM/GDPR) + frequency cap + timezone.
+export const emailPreferences = pgTable("email_preferences", {
   userId: uuid("user_id")
-    .references(() => profiles.id, { onDelete: "cascade" })
-    .notNull(),
-  quizId: uuid("quiz_id")
-    .references(() => quizzes.id, { onDelete: "cascade" })
-    .notNull(),
-  answers: jsonb("answers"),
-  score: real("score"),
-  passed: boolean("passed").default(false).notNull(),
-  feedback: jsonb("feedback"), // corrección por pregunta (Haiku)
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    .primaryKey()
+    .references(() => profiles.id, { onDelete: "cascade" }),
+  unsubscribedAll: boolean("unsubscribed_all").default(false).notNull(),
+  allowModuleReady: boolean("allow_module_ready").default(true).notNull(),
+  allowLearned: boolean("allow_learned").default(true).notNull(),
+  allowStreak: boolean("allow_streak").default(true).notNull(),
+  allowWeeklyRecap: boolean("allow_weekly_recap").default(true).notNull(),
+  allowReengagement: boolean("allow_reengagement").default(true).notNull(),
+  maxPerWeek: integer("max_per_week").default(3).notNull(),
+  timezone: text("timezone").default("America/Santiago").notNull(),
+  unsubToken: uuid("unsub_token").defaultRandom().notNull().unique(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// Registro de envíos + métricas de entregabilidad (webhooks de Resend).
+export const emailLog = pgTable(
+  "email_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    outboxId: uuid("outbox_id").references(() => emailOutbox.id, {
+      onDelete: "set null",
+    }),
+    type: emailType("type").notNull(),
+    subject: text("subject"),
+    providerMessageId: text("provider_message_id"),
+    sentAt: timestamp("sent_at", { withTimezone: true }).defaultNow().notNull(),
+    openedAt: timestamp("opened_at", { withTimezone: true }),
+    clickedAt: timestamp("clicked_at", { withTimezone: true }),
+    bouncedAt: timestamp("bounced_at", { withTimezone: true }),
+    complainedAt: timestamp("complained_at", { withTimezone: true }),
+  },
+  (t) => ({
+    userSentIdx: index("email_log_user_sent_idx").on(t.userId, t.sentAt),
+    providerIdx: index("email_log_provider_idx").on(t.providerMessageId),
+  }),
+);
 
 // ---------- Tutor de IA ----------
 export const tutorConversations = pgTable("tutor_conversations", {
@@ -365,3 +549,6 @@ export type Quiz = typeof quizzes.$inferSelect;
 export type Question = typeof questions.$inferSelect;
 export type Progress = typeof progress.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
+export type XpEvent = typeof xpEvents.$inferSelect;
+export type Achievement = typeof achievements.$inferSelect;
+export type UserAchievement = typeof userAchievements.$inferSelect;

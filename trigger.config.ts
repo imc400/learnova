@@ -22,6 +22,9 @@ export default defineConfig({
           "YOUTUBE_API_KEY",
           "NEXT_PUBLIC_SUPABASE_URL",
           "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+          "RESEND_API_KEY",
+          "EMAIL_FROM",
+          "NEXT_PUBLIC_SITE_URL",
         ];
         return keys
           .filter((k) => process.env[k])

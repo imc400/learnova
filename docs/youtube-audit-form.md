@@ -4,14 +4,14 @@
 **Formulario:** YouTube API Services – Audit and Quota Extension Form
 **Sección 1:** "Completar una auditoría de cumplimiento para solicitar un aumento de cuota"
 
-> ✅ App desplegada y PÚBLICA · /privacidad y /terminos en vivo · atribución a YouTube visible. URL de producción: https://learnova-ignacios-projects-91899df9.vercel.app (dominio propio aulia.ai en proceso de conexión). Demo: cuenta demo + screenshots.
+> ✅ App desplegada y PÚBLICA en dominio propio · /privacidad y /terminos en vivo · atribución a YouTube visible. URL de producción: https://aulia.ai. Demo: cuenta demo + screenshots.
 
 ---
 
 ## Sección 2 — Organización y contacto
 
 Organization / Developer name: Aulia
-Website / API Client URL: https://learnova-ignacios-projects-91899df9.vercel.app (URL de producción en Vercel; reemplazar por el dominio en vivo al desplegar). Página que muestra la integración con YouTube: https://learnova-ignacios-projects-91899df9.vercel.app/app/rutas/<id>/leccion/<id> (cada lección incrusta un video de YouTube con el reproductor IFrame oficial).
+Website / API Client URL: https://aulia.ai (dominio de producción en vivo). Página que muestra la integración con YouTube: https://aulia.ai/app/rutas/<id>/leccion/<id> (cada lección incrusta un video de YouTube con el reproductor IFrame oficial).
 Contact email: igblancora@gmail.com
 Country: Chile
 Google Cloud Project Number: 81836469922
@@ -32,7 +32,7 @@ Metrics derived from YouTube data? No calculamos ni mostramos métricas propias 
 ## Sección 4 — Clientes de API (API Clients)
 
 API Client name: Aulia (aplicación web Next.js).
-Where can we find the API Client? https://learnova-ignacios-projects-91899df9.vercel.app — integración visible en cualquier lección: https://learnova-ignacios-projects-91899df9.vercel.app/app/rutas/<pathId>/leccion/<lessonId>
+Where can we find the API Client? https://aulia.ai — integración visible en cualquier lección: https://aulia.ai/app/rutas/<pathId>/leccion/<lessonId>
 Project Number: 81836469922 · Project ID: learnova-498716
 Is this publicly or privately available? Privately (tras registro/login gratuito). Proveeremos una cuenta demo a los revisores.
 Login / Demo account access: Cuenta demo: demo@learnova.app / (contraseña que se entrega en el formulario). Pasos: 1) iniciar sesión, 2) 'Crear mi ruta', 3) responder el cuestionario (ej. tema 'Python', nivel principiante, idioma español), 4) abrir cualquier lección → se muestra el video de YouTube incrustado con atribución y enlace 'Ver en YouTube'.
@@ -56,7 +56,7 @@ Data refresh frequency: metadatos de video refrescados/borrados automáticamente
 
 ## Sección 6 — Pruebas y documentación
 
-Adjuntar: (1) Screencast (60-90 s) mostrando el flujo: crear ruta → abrir lección → video de YouTube incrustado con el reproductor IFrame oficial, atribución 'Video proporcionado por YouTube' con logo clicable y enlace 'Ver en YouTube'. (2) Screenshots: pantalla de lección con el embed y la atribución; el footer con la mención a los Servicios de la API de YouTube + enlaces a Términos de YouTube (https://www.youtube.com/t/terms) y Política de Privacidad de Google (https://policies.google.com/privacy); la página /privacidad publicada; la página /terminos publicada. (3) Enlaces vivos: https://learnova-ignacios-projects-91899df9.vercel.app/privacidad y https://learnova-ignacios-projects-91899df9.vercel.app/terminos.
+Adjuntar: (1) Screencast (60-90 s) mostrando el flujo: crear ruta → abrir lección → video de YouTube incrustado con el reproductor IFrame oficial, atribución 'Video proporcionado por YouTube' con logo clicable y enlace 'Ver en YouTube'. (2) Screenshots: pantalla de lección con el embed y la atribución; el footer con la mención a los Servicios de la API de YouTube + enlaces a Términos de YouTube (https://www.youtube.com/t/terms) y Política de Privacidad de Google (https://policies.google.com/privacy); la página /privacidad publicada; la página /terminos publicada. (3) Enlaces vivos: https://aulia.ai/privacidad y https://aulia.ai/terminos.
 Credenciales demo: demo@learnova.app + contraseña (en el campo correspondiente del formulario) con instrucciones paso a paso para llegar a una lección con video.
 Declaración de cumplimiento de código: usamos solo API Key server-side (sin OAuth), reproductor IFrame sin modificar (youtube-nocookie.com), NO hacemos scraping, NO descargamos ni re-alojamos audio/video, y refrescamos/borramos los metadatos antes de 30 días.
 
@@ -64,7 +64,7 @@ Declaración de cumplimiento de código: usamos solo API Key server-side (sin OA
 
 ## Sección 7 — Declaraciones (Attestations)
 
-Confirmamos que: (1) Cumplimos los YouTube API Services Terms of Service y las Developer Policies. (2) Mantenemos publicada y accesible una Política de Privacidad (https://learnova-ignacios-projects-91899df9.vercel.app/privacidad) que notifica el uso de los Servicios de la API de YouTube y enlaza la Política de Privacidad de Google. (3) Nuestros Términos (https://learnova-ignacios-projects-91899df9.vercel.app/terminos) enlazan los Términos de Servicio de YouTube y declaran que al usar la app el usuario los acepta. (4) Mostramos las YouTube Brand Features y la atribución a YouTube en toda página que muestra contenido de YouTube, con el logo clicable de vuelta a YouTube, sin modificar el reproductor ni ocultar la atribución. (5) NO almacenamos contenido audiovisual; almacenamos metadatos públicos por un máximo de 30 días, con refresco/borrado automático y desactivación de videos caídos. (6) NO hacemos scraping ni eludimos límites de cuota. (7) Si Google termina nuestro acceso, cesaremos el uso y eliminaremos los datos de la API. (8) Cumplimos la EU User Consent Policy de Google para usuarios de la UE. (9) No solicitamos OAuth ni datos sensibles de usuarios.
+Confirmamos que: (1) Cumplimos los YouTube API Services Terms of Service y las Developer Policies. (2) Mantenemos publicada y accesible una Política de Privacidad (https://aulia.ai/privacidad) que notifica el uso de los Servicios de la API de YouTube y enlaza la Política de Privacidad de Google. (3) Nuestros Términos (https://aulia.ai/terminos) enlazan los Términos de Servicio de YouTube y declaran que al usar la app el usuario los acepta. (4) Mostramos las YouTube Brand Features y la atribución a YouTube en toda página que muestra contenido de YouTube, con el logo clicable de vuelta a YouTube, sin modificar el reproductor ni ocultar la atribución. (5) NO almacenamos contenido audiovisual; almacenamos metadatos públicos por un máximo de 30 días, con refresco/borrado automático y desactivación de videos caídos. (6) NO hacemos scraping ni eludimos límites de cuota. (7) Si Google termina nuestro acceso, cesaremos el uso y eliminaremos los datos de la API. (8) Cumplimos la EU User Consent Policy de Google para usuarios de la UE. (9) No solicitamos OAuth ni datos sensibles de usuarios.
 
 ---
 

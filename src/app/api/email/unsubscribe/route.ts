@@ -1,0 +1,52 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { emailPreferences } from "@/db/schema";
+
+/*
+  Baja de correos de UN clic, sin login (CAN-SPAM / List-Unsubscribe):
+  - GET: clic humano desde el link del footer → confirma en una página simple.
+  - POST: List-Unsubscribe-Post=One-Click (Gmail/Yahoo la disparan solos).
+  El token es un uuid opaco por usuario (email_preferences.unsub_token).
+*/
+
+async function unsubscribe(token: string | null): Promise<boolean> {
+  if (!token || !/^[0-9a-f-]{36}$/i.test(token)) return false;
+  const updated = await db
+    .update(emailPreferences)
+    .set({ unsubscribedAll: true, updatedAt: new Date() })
+    .where(eq(emailPreferences.unsubToken, token))
+    .returning({ userId: emailPreferences.userId });
+  return updated.length > 0;
+}
+
+function page(title: string, body: string, ok: boolean) {
+  return new Response(
+    `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Aulia</title></head>
+<body style="margin:0;font-family:'Nunito Sans',system-ui,sans-serif;background:#FAF6EE;color:#16261F;display:grid;place-items:center;min-height:100dvh">
+<div style="max-width:420px;text-align:center;padding:40px 24px">
+<div style="font-weight:800;font-size:22px;color:#0E5340;margin-bottom:18px">Aulia</div>
+<h1 style="font-size:22px;margin:0 0 10px">${title}</h1>
+<p style="color:#5C6B63;line-height:1.5;margin:0 0 24px">${body}</p>
+<a href="https://aulia.ai${ok ? "/app" : ""}" style="background:#1F7A63;color:#fff;text-decoration:none;border-radius:999px;padding:12px 26px;font-weight:800;display:inline-block">Volver a Aulia</a>
+</div></body></html>`,
+    { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
+export async function GET(req: Request) {
+  const token = new URL(req.url).searchParams.get("token");
+  const ok = await unsubscribe(token);
+  return ok
+    ? page(
+        "Listo, no te escribiremos más",
+        "Diste de baja los correos de avance y recordatorios. Puedes reactivarlos cuando quieras desde tu cuenta. Tu progreso sigue intacto.",
+        true,
+      )
+    : page("Enlace inválido", "Este enlace de baja no es válido o ya expiró.", false);
+}
+
+export async function POST(req: Request) {
+  const token = new URL(req.url).searchParams.get("token");
+  const ok = await unsubscribe(token);
+  return new Response(null, { status: ok ? 200 : 400 });
+}

@@ -168,6 +168,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
     // --- PASO 2: rellenar contenido por módulo EN ORDEN (prioriza los primeros);
     //     lecciones del módulo en paralelo. Cada lección queda lista al instante. ---
     let done = 0;
+    let firstModuleEmailSent = false;
     const emitProgress = async (step: string) => {
       const pct =
         totalLessons > 0 ? 25 + Math.round((done / totalLessons) * 70) : 25;
@@ -212,6 +213,29 @@ export async function runPathGeneration(pathId: string): Promise<void> {
           await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
         }),
       );
+
+      // El PRIMER módulo con contenido completo → correo "tu ruta está lista,
+      // empieza por aquí" (uno solo por ruta; dedupe por moduleId).
+      const firstPlan = plan[0];
+      if (!firstModuleEmailSent && firstPlan && firstPlan.lessons.length) {
+        firstModuleEmailSent = true;
+        const [firstModule] = await db
+          .select({ id: modulesT.id })
+          .from(modulesT)
+          .where(and(eq(modulesT.pathId, pathId), eq(modulesT.orderIndex, 0)))
+          .limit(1);
+        if (firstModule) {
+          const { enqueueProgressEmail } = await import("@/lib/email/enqueue");
+          await enqueueProgressEmail(path.userId, "module_ready", firstModule.id, {
+            pathId,
+            pathTitle: skeleton.title,
+            moduleId: firstModule.id,
+            moduleTitle: firstPlan.m.title,
+            lessonTitles: firstPlan.m.lessons.map((l) => l.title),
+            language: intake.language,
+          });
+        }
+      }
     }
 
     // Contenido completo (la ruta ya estaba 'ready' desde el Paso 1).

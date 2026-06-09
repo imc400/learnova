@@ -32,6 +32,10 @@ const serverSchema = z.object({
   // --- Trigger.dev — opcional hasta fase de pipeline ---
   TRIGGER_SECRET_KEY: z.string().min(1).optional(),
 
+  // --- Email (Resend) — opcional hasta fase de correos por avance ---
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().min(1).default("Aulia <hola@mail.aulia.ai>"),
+
   // --- Flow.cl (pagos) — opcional hasta fase de monetización ---
   FLOW_API_KEY: z.string().min(1).optional(),
   FLOW_SECRET_KEY: z.string().min(1).optional(),

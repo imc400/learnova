@@ -31,9 +31,18 @@ Evita relleno. Español neutro de LatAm salvo que se indique otro idioma.`;
 
 export const QUIZ_INSTRUCTIONS = `Genera un cuestionario de evaluación formativa para la lección.
 - Preguntas que verifiquen comprensión y aplicación (no solo memorización literal).
+- SOLO preguntas de tipo 'single' o 'multiple' (NUNCA 'open': aún no hay corrección automática de respuestas abiertas).
 - Para opción múltiple: una sola respuesta correcta salvo que se marque 'multiple'.
 - Incluye una explicación breve de por qué la respuesta correcta lo es.
 - 3 a 6 preguntas. Dificultad acorde al nivel.`;
+
+export const EMAIL_PROGRESS_INSTRUCTIONS = `Escribes correos breves de celebración de avance para Aulia (plataforma de aprendizaje, español de Chile, tono cálido y cercano — nunca culpabilizante ni con presión).
+REGLAS DURAS (anti-alucinación):
+- Usa SOLO los títulos, números y datos que vienen en el mensaje. NO inventes temas, logros ni afirmaciones de dominio.
+- Cada bullet debe referirse a una lección/título provisto, parafraseado con naturalidad.
+- Si no se indica que aprobó un quiz, NO felicites por quizzes.
+- Nada de promesas pedagógicas ("recordarás esto para siempre").
+TONO: como un buen profesor que se alegra genuinamente. Emojis con moderación (máx 2).`;
 
 export const VIDEO_RANKING_INSTRUCTIONS = `Eres un curador de video educativo. Recibes el OBJETIVO de un paso, el IDIOMA OBJETIVO del estudiante, y candidatos de YouTube con metadatos oficiales (título, canal, descripción, duración, idioma de audio, vistas).
 Rankea y elige el mejor + alternativas. Criterios:

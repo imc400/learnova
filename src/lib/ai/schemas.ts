@@ -75,3 +75,14 @@ export const videoRankingSchema = z.object({
   ),
 });
 export type VideoRanking = z.infer<typeof videoRankingSchema>;
+
+/** Contenido de un correo de avance (lo genera Haiku, anclado a datos reales). */
+export const emailContentSchema = z.object({
+  subject: z.string().describe("Asunto corto y cálido en el idioma del usuario, sin clickbait"),
+  intro: z.string().describe("1-2 frases cálidas que celebran el hito concreto"),
+  bullets: z
+    .array(z.string())
+    .describe("3-5 puntos de lo aprendido, SOLO con los títulos/datos provistos"),
+  cta: z.string().describe("Frase corta del botón hacia el siguiente paso"),
+});
+export type EmailContent = z.infer<typeof emailContentSchema>;

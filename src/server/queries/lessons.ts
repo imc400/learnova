@@ -7,6 +7,7 @@ import {
   videoCandidates,
   quizzes,
   questions,
+  progress,
 } from "@/db/schema";
 
 /** Lección con su contexto (módulo + ruta), videos y quiz. Valida propiedad. */
@@ -47,11 +48,19 @@ export async function getLessonDetail(lessonId: string, userId: string) {
         .orderBy(asc(questions.orderIndex))
     : [];
 
+  // Estado de avance del usuario sobre esta lección.
+  const [prog] = await db
+    .select({ status: progress.status })
+    .from(progress)
+    .where(and(eq(progress.userId, userId), eq(progress.lessonId, lessonId)))
+    .limit(1);
+
   return {
     lesson: row.lesson,
     module: row.module,
     path: row.path,
     videos,
     quiz: quiz ? { ...quiz, questions: quizQuestions } : null,
+    completed: prog?.status === "completed",
   };
 }

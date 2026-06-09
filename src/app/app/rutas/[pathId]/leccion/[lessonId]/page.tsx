@@ -36,11 +36,12 @@ export default async function LessonPage({
   const content = detail.lesson.content as LessonContent | null;
 
   // Acción de completar (inline server action que captura los ids).
+  // Sin redirect: el usuario se queda en la lección y ve el estado completado;
+  // revalidar el layout refresca también el header (XP/racha) y las barras.
   async function complete() {
     "use server";
     await completeLessonAction(pathId, lessonId);
-    revalidatePath(`/app/rutas/${pathId}`);
-    redirect(`/app/rutas/${pathId}`);
+    revalidatePath("/app", "layout");
   }
 
   // Preguntas seguras para el cliente (sin respuestas correctas).
@@ -150,12 +151,18 @@ export default async function LessonPage({
           </div>
         )}
 
-        {/* Completar */}
-        <form action={complete} className="mt-10">
-          <SubmitButton variant="primary" size="lg" pendingText="Guardando…">
-            <CheckCircle2 className="size-4" /> Marcar como completada
-          </SubmitButton>
-        </form>
+        {/* Completar — solo cuando el contenido ya existe (XP por dominio real) */}
+        {detail.completed ? (
+          <div className="mt-10 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary">
+            <CheckCircle2 className="size-4" /> Lección completada
+          </div>
+        ) : content ? (
+          <form action={complete} className="mt-10">
+            <SubmitButton variant="primary" size="lg" pendingText="Guardando…">
+              <CheckCircle2 className="size-4" /> Marcar como completada
+            </SubmitButton>
+          </form>
+        ) : null}
       </article>
 
       {/* Tutor (sidebar) */}

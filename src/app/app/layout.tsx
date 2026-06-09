@@ -2,7 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LogOut, LayoutGrid, Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getUserStats } from "@/server/queries/gamification";
 import { Logo } from "@/components/brand/logo";
+import { UserStatsChips } from "@/components/app/user-stats-chips";
 import { Button } from "@/components/ui/button";
 
 export default async function AppLayout({
@@ -15,6 +17,8 @@ export default async function AppLayout({
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  const stats = await getUserStats(user.id);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -32,7 +36,15 @@ export default async function AppLayout({
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <span className="hidden text-sm text-muted-foreground sm:inline">
+            {stats && (
+              <UserStatsChips
+                level={stats.level}
+                totalXp={stats.totalXp}
+                streak={stats.currentStreak}
+                levelProgress={stats.levelProgress}
+              />
+            )}
+            <span className="hidden text-sm text-muted-foreground lg:inline">
               {user.email}
             </span>
             <form action="/auth/signout" method="post">

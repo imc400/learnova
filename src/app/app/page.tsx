@@ -1,7 +1,21 @@
 import Link from "next/link";
-import { ArrowRight, Plus, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Plus,
+  Sparkles,
+  Trophy,
+  Flame,
+  Footprints,
+  Flag,
+  Brain,
+  Medal,
+  Compass,
+  type LucideIcon,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { listUserPaths } from "@/server/queries/paths";
+import { getUserAchievements } from "@/server/queries/gamification";
+import { LearningProgress } from "@/components/app/learning-progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { pathStatus } from "@/db/schema";
@@ -18,12 +32,35 @@ const STATUS: Record<
   failed: { label: "Falló", variant: "default" },
 };
 
+// Mapa de íconos del catálogo de logros (achievements.icon → componente).
+const ACHIEVEMENT_ICONS: Record<string, LucideIcon> = {
+  footprints: Footprints,
+  flag: Flag,
+  trophy: Trophy,
+  brain: Brain,
+  sparkles: Sparkles,
+  flame: Flame,
+  medal: Medal,
+  compass: Compass,
+};
+
 export default async function DashboardPage() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const paths = user ? await listUserPaths(user.id) : [];
+  const [paths, achievements] = user
+    ? await Promise.all([listUserPaths(user.id), getUserAchievements(user.id)])
+    : [[], []];
+
+  // Solo se cuentan/muestran los visibles: deterministas + sorpresas YA ganadas.
+  const visibleAchievements = achievements.filter(
+    (a) => a.kind === "deterministic" || a.unlockedAt,
+  );
+  const unlocked = visibleAchievements.filter((a) => a.unlockedAt);
+  const hasHiddenSurprises = achievements.some(
+    (a) => a.kind === "surprise" && !a.unlockedAt,
+  );
 
   return (
     <div className="flex flex-col gap-8">
@@ -62,6 +99,7 @@ export default async function DashboardPage() {
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {paths.map((p) => {
             const s = STATUS[p.status];
+            const remaining = p.lessonCount - p.completedLessons;
             return (
               <Link
                 key={p.id}
@@ -77,14 +115,61 @@ export default async function DashboardPage() {
                 <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
                   {p.goal}
                 </p>
-                <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+                {p.lessonCount > 0 && (
+                  <LearningProgress
+                    done={p.completedLessons}
+                    total={p.lessonCount}
+                    size="sm"
+                    className="mt-4"
+                  />
+                )}
+                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="capitalize">{p.level}</span>
                   {p.estimatedHours ? <span>· ~{Math.round(p.estimatedHours)} h</span> : null}
+                  {p.completedLessons > 0 && remaining > 0 && remaining <= 3 && (
+                    <span className="font-medium text-primary">
+                      · ¡Te {remaining === 1 ? "falta 1 lección" : `faltan ${remaining} lecciones`}!
+                    </span>
+                  )}
                 </div>
               </Link>
             );
           })}
         </div>
+      )}
+
+      {/* Logros */}
+      {paths.length > 0 && (
+        <section>
+          <h2 className="font-display text-lg font-semibold tracking-tight">
+            Logros
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {unlocked.length} de {visibleAchievements.length} desbloqueados
+            {hasHiddenSurprises && " · hay logros secretos por descubrir 🤫"}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            {visibleAchievements
+              .map((a) => {
+                const Icon = ACHIEVEMENT_ICONS[a.icon] ?? Trophy;
+                const isUnlocked = !!a.unlockedAt;
+                return (
+                  <div
+                    key={a.id}
+                    title={`${a.description}${a.xpReward ? ` · +${a.xpReward} XP` : ""}`}
+                    className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-colors ${
+                      isUnlocked
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "border-border bg-card text-muted-foreground opacity-60"
+                    }`}
+                  >
+                    <Icon className="size-4" />
+                    <span className="font-medium">{a.title}</span>
+                  </div>
+                );
+              })}
+          </div>
+        </section>
       )}
     </div>
   );

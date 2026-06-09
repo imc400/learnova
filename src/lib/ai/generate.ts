@@ -5,15 +5,18 @@ import {
   SYSTEM_PEDAGOGY,
   LESSON_INSTRUCTIONS,
   QUIZ_INSTRUCTIONS,
+  EMAIL_PROGRESS_INSTRUCTIONS,
 } from "./prompts";
 import {
   pathSkeletonSchema,
   lessonContentSchema,
   quizSchema,
+  emailContentSchema,
   type Intake,
   type PathSkeleton,
   type LessonContent,
   type GeneratedQuiz,
+  type EmailContent,
 } from "./schemas";
 
 /**
@@ -92,6 +95,56 @@ export async function generateLessonContent(args: {
           "",
           "Genera el contenido de esta lección y una buena query para buscar su video de apoyo en YouTube.",
         ].join("\n"),
+      },
+    ],
+  });
+  if (!res.parsed_output) {
+    throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
+  }
+  return res.parsed_output;
+}
+
+/**
+ * NIVEL 3 — Haiku 4.5 redacta el correo de avance ("esto aprendiste").
+ * Grounding duro: el contexto trae SOLO títulos/datos reales; el caller
+ * post-valida que los bullets no contradigan los datos antes de enviar.
+ */
+export async function generateProgressEmail(args: {
+  kind: "module_learned" | "path_completed";
+  pathTitle: string;
+  moduleTitle?: string;
+  lessonTitles: string[];
+  quizzesPassed: number;
+  progressPct: number;
+  language: string;
+  firstName?: string | null;
+}): Promise<EmailContent> {
+  const client = getAnthropic();
+  const res = await client.messages.parse({
+    model: MODELS.ranker,
+    max_tokens: MAX_TOKENS.ranker,
+    system: cachedSystem(EMAIL_PROGRESS_INSTRUCTIONS),
+    output_config: { format: zodOutputFormat(emailContentSchema) },
+    messages: [
+      {
+        role: "user",
+        content: [
+          args.kind === "path_completed"
+            ? `HITO: el estudiante COMPLETÓ la ruta entera "${args.pathTitle}".`
+            : `HITO: el estudiante completó el módulo "${args.moduleTitle}" de la ruta "${args.pathTitle}".`,
+          args.firstName ? `Nombre del estudiante: ${args.firstName}` : "",
+          `Lecciones completadas en este hito (títulos REALES, única fuente para los bullets):`,
+          ...args.lessonTitles.map((t) => `- ${t}`),
+          args.quizzesPassed > 0
+            ? `Quizzes aprobados en este tramo: ${args.quizzesPassed}`
+            : "Sin datos de quizzes (no felicitar por quizzes).",
+          `Avance total de la ruta: ${args.progressPct}%`,
+          `Idioma: ${args.language}`,
+          "",
+          "Redacta el correo de celebración.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       },
     ],
   });

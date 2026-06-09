@@ -12,17 +12,22 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, full_name, avatar_url, locale)
+  insert into public.profiles (id, full_name, avatar_url, locale, email)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name'),
     new.raw_user_meta_data->>'avatar_url',
-    coalesce(new.raw_user_meta_data->>'preferred_language', 'es')
+    coalesce(new.raw_user_meta_data->>'preferred_language', 'es'),
+    new.email
   )
-  on conflict (id) do nothing;
+  on conflict (id) do update set email = excluded.email;
 
   insert into public.subscriptions (user_id, plan, status)
   values (new.id, 'free', 'active')
+  on conflict (user_id) do nothing;
+
+  insert into public.email_preferences (user_id)
+  values (new.id)
   on conflict (user_id) do nothing;
 
   return new;
@@ -50,6 +55,9 @@ alter table public.subscriptions       enable row level security;
 alter table public.path_purchases      enable row level security;
 alter table public.skeleton_cache      enable row level security; -- sin policy pública: solo service_role
 alter table public.youtube_search_cache enable row level security; -- sin policy pública: solo service_role
+alter table public.xp_events           enable row level security;
+alter table public.achievements        enable row level security;
+alter table public.user_achievements   enable row level security;
 
 -- 3) Políticas — el dueño (auth.uid()) puede ver/editar lo suyo
 --    (el service_role del servidor bypassa RLS para el pipeline de generación)
@@ -142,6 +150,33 @@ create policy "subs_read_owner" on public.subscriptions
 -- path_purchases (lectura del dueño)
 drop policy if exists "purchases_read_owner" on public.path_purchases;
 create policy "purchases_read_owner" on public.path_purchases
+  for select using (user_id = auth.uid());
+
+-- ENDURECIMIENTO (defensa en profundidad, además de RLS):
+-- el navegador (PostgREST con anon/authenticated) NO escribe gamificación,
+-- progreso ni intentos — esas escrituras solo viven en el servidor (Drizzle).
+-- Y el answer key de los quizzes (correct_answer) jamás sale por PostgREST.
+revoke insert, update, delete on public.profiles from anon, authenticated;
+grant update (full_name, avatar_url, locale, onboarding_completed) on public.profiles to authenticated;
+revoke insert, update, delete on public.progress from anon, authenticated;
+revoke insert, update, delete on public.quiz_attempts from anon, authenticated;
+revoke all on public.questions from anon, authenticated;
+grant select (id, quiz_id, order_index, type, prompt, options, explanation, created_at) on public.questions to authenticated;
+revoke truncate, trigger on public.profiles, public.progress, public.quiz_attempts,
+  public.questions, public.xp_events, public.achievements, public.user_achievements
+  from anon, authenticated;
+
+-- gamificación: el dueño lee lo suyo; las escrituras las hace el servidor
+drop policy if exists "xp_events_read_owner" on public.xp_events;
+create policy "xp_events_read_owner" on public.xp_events
+  for select using (user_id = auth.uid());
+
+drop policy if exists "achievements_read_all" on public.achievements;
+create policy "achievements_read_all" on public.achievements
+  for select using (auth.role() = 'authenticated');
+
+drop policy if exists "user_achievements_read_owner" on public.user_achievements;
+create policy "user_achievements_read_owner" on public.user_achievements
   for select using (user_id = auth.uid());
 
 -- 4) Realtime: publicar learning_paths para que el progreso de generación

@@ -7,11 +7,13 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Trophy,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getPathTree } from "@/server/queries/paths";
 import { GeneratingState } from "@/components/app/generating-state";
 import { RouteProgressLive } from "@/components/app/route-progress-live";
+import { LearningProgress } from "@/components/app/learning-progress";
 import { Badge } from "@/components/ui/badge";
 
 export default async function PathPage({
@@ -97,51 +99,101 @@ export default async function PathPage({
         />
       )}
 
-      <div className="mt-8 space-y-6">
-        {path.modules.map((m, mi) => (
-          <section key={m.id}>
-            <div className="flex items-baseline gap-3">
-              <span className="font-display text-sm font-semibold text-primary">
-                Módulo {mi + 1}
+      {/* Avance REAL del usuario (lecciones completadas) */}
+      {path.lessonCount > 0 && (
+        <div className="mt-6 rounded-lg border border-border bg-card p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-sm font-semibold">Tu avance</h2>
+            {path.completedLessons === path.lessonCount && (
+              <span className="flex items-center gap-1.5 text-sm font-semibold text-primary">
+                <Trophy className="size-4" /> ¡Ruta completada!
               </span>
-            </div>
-            <h2 className="mt-1 font-display text-lg font-semibold">{m.title}</h2>
-            {m.objective && (
-              <p className="mt-1 text-sm text-muted-foreground">{m.objective}</p>
             )}
-            <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
-              {m.lessons.map((l) => (
-                <li key={l.id}>
-                  <Link
-                    href={`/app/rutas/${path.id}/leccion/${l.id}`}
-                    className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted"
+          </div>
+          <LearningProgress
+            done={path.completedLessons}
+            total={path.lessonCount}
+            className="mt-2"
+          />
+        </div>
+      )}
+
+      <div className="mt-8 space-y-6">
+        {path.modules.map((m, mi) => {
+          const remaining = m.lessons.length - m.completedCount;
+          return (
+            <section key={m.id}>
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="font-display text-sm font-semibold text-primary">
+                  Módulo {mi + 1}
+                </span>
+                {m.lessons.length > 0 && (
+                  <span
+                    className={`text-xs tabular-nums ${
+                      remaining === 0
+                        ? "font-semibold text-primary"
+                        : "text-muted-foreground"
+                    }`}
                   >
-                    <span
-                      className={`grid size-7 shrink-0 place-items-center rounded-full border text-xs ${
-                        l.content
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-border text-muted-foreground"
-                      }`}
+                    {remaining === 0
+                      ? "✓ Completado"
+                      : `${m.completedCount}/${m.lessons.length}`}
+                  </span>
+                )}
+              </div>
+              <h2 className="mt-1 font-display text-lg font-semibold">{m.title}</h2>
+              {m.objective && (
+                <p className="mt-1 text-sm text-muted-foreground">{m.objective}</p>
+              )}
+              {remaining === 1 && m.completedCount > 0 && (
+                <p className="mt-1.5 text-sm font-medium text-accent-foreground">
+                  🔥 Te falta solo 1 lección para cerrar este módulo.
+                </p>
+              )}
+              <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                {m.lessons.map((l, li) => (
+                  <li key={l.id}>
+                    <Link
+                      href={`/app/rutas/${path.id}/leccion/${l.id}`}
+                      className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-muted"
                     >
-                      {l.content ? (
-                        <CheckCircle2 className="size-4" />
-                      ) : (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      )}
-                    </span>
-                    <span className="flex-1 text-sm font-medium">{l.title}</span>
-                    {l.estimatedMinutes ? (
-                      <span className="text-xs text-muted-foreground">
-                        {l.estimatedMinutes} min
+                      <span
+                        className={`grid size-7 shrink-0 place-items-center rounded-full border text-xs ${
+                          l.completed
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : l.content
+                              ? "border-border text-muted-foreground"
+                              : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        {l.completed ? (
+                          <CheckCircle2 className="size-4" />
+                        ) : l.content ? (
+                          <span className="tabular-nums">{li + 1}</span>
+                        ) : (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        )}
                       </span>
-                    ) : null}
-                    <ChevronRight className="size-4 text-muted-foreground" />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
+                      <span
+                        className={`flex-1 text-sm font-medium ${
+                          l.completed ? "text-muted-foreground" : ""
+                        }`}
+                      >
+                        {l.title}
+                      </span>
+                      {l.estimatedMinutes ? (
+                        <span className="text-xs text-muted-foreground">
+                          {l.estimatedMinutes} min
+                        </span>
+                      ) : null}
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
       </div>
     </div>
   );
