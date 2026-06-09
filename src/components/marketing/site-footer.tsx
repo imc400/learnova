@@ -32,7 +32,7 @@ export function SiteFooter() {
       <div className="border-t border-border">
         <div className="container-page py-4 text-xs leading-relaxed text-muted-foreground">
           Los videos se muestran mediante los Servicios de la API de YouTube. Al
-          usar Learnova aceptas los{" "}
+          usar Aulia aceptas los{" "}
           <a
             href="https://www.youtube.com/t/terms"
             target="_blank"

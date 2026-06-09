@@ -119,7 +119,7 @@ export function YouTubeEmbed({
         >
           <Youtube className="size-4 text-[#FF0000]" aria-hidden />
         </a>
-        <span>Video proporcionado por YouTube · curado por Learnova.</span>
+        <span>Video proporcionado por YouTube · curado por Aulia.</span>
       </p>
     </div>
   );

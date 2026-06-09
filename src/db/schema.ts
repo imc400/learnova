@@ -13,7 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 /*
-  Esquema de datos de Learnova (Postgres / Supabase).
+  Esquema de datos de Aulia (Postgres / Supabase).
   Convenciones:
   - PKs uuid (defaultRandom).
   - profiles.id == auth.users.id de Supabase (sin FK cross-schema; lo enlaza un

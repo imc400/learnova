@@ -340,7 +340,7 @@ function PlanCard({
 function Faq() {
   const faqs = [
     { q: "¿Cómo crea la IA mi ruta?", a: "Analiza tu meta, tu nivel y tu tiempo, y diseña un currículum completo paso a paso, con lecciones, notas, pruebas y el mejor video gratuito para cada tema." },
-    { q: "¿Sirve para cualquier tema?", a: "Sí. Desde aprender a cocinar o tocar guitarra hasta programación, marketing o finanzas. Si se puede aprender, Learnova te arma la ruta." },
+    { q: "¿Sirve para cualquier tema?", a: "Sí. Desde aprender a cocinar o tocar guitarra hasta programación, marketing o finanzas. Si se puede aprender, Aulia te arma la ruta." },
     { q: "¿Los videos tienen costo?", a: "No. Curamos los mejores videos gratuitos de YouTube y los mostramos dentro de tu ruta, en tu idioma y a tu nivel." },
     { q: "¿En qué idiomas está?", a: "Empezamos en español; el contenido y el tutor funcionan en tu idioma." },
     { q: "¿Puedo cancelar cuando quiera?", a: "Claro. Sin contratos ni permanencia. Cancelas con un clic." },

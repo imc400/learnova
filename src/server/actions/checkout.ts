@@ -37,7 +37,7 @@ export async function startPathPurchaseAction(pathId: string) {
 
   const payment = await createPayment({
     commerceOrder: `path_${purchase.id}`,
-    subject: "Learnova — Ruta de aprendizaje",
+    subject: "Aulia — Ruta de aprendizaje",
     amountCLP: PRICES_CLP.single,
     email: user.email!,
     urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,
@@ -66,7 +66,7 @@ export async function startProSubscriptionAction() {
 
   const payment = await createPayment({
     commerceOrder: `sub_${user.id}`,
-    subject: "Learnova Pro — Suscripción mensual",
+    subject: "Aulia Pro — Suscripción mensual",
     amountCLP: PRICES_CLP.pro,
     email: user.email!,
     urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,

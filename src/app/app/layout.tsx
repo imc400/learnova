@@ -46,7 +46,7 @@ export default async function AppLayout({
       <main className="container-page py-8">{children}</main>
       <footer className="border-t border-border">
         <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-1 py-4 text-xs text-muted-foreground">
-          <span>© Learnova</span>
+          <span>© Aulia</span>
           <Link href="/terminos" className="hover:text-foreground">
             Términos
           </Link>

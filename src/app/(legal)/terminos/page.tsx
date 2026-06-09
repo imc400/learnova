@@ -4,7 +4,7 @@ import { TERMS_MD } from "@/content/legal";
 
 export const metadata: Metadata = {
   title: "Términos y Condiciones",
-  description: "Términos y condiciones de uso de Learnova.",
+  description: "Términos y condiciones de uso de Aulia.",
 };
 
 export default function TerminosPage() {

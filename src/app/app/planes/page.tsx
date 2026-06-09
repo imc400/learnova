@@ -25,7 +25,7 @@ export default async function PlansPage() {
 
       <div className="mt-6 rounded-xl border border-primary bg-card p-6 shadow-lift">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold">Learnova Pro</h2>
+          <h2 className="font-display text-lg font-semibold">Aulia Pro</h2>
           {ent.isPro && <Badge variant="primary">Tu plan actual</Badge>}
         </div>
         <div className="mt-2 flex items-baseline gap-1">

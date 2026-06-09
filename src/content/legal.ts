@@ -1,11 +1,11 @@
-// Contenido legal de Learnova (Markdown). Renderizado en /privacidad y /terminos.
+// Contenido legal de Aulia (Markdown). Renderizado en /privacidad y /terminos.
 // Generado por el workflow de auditoría de YouTube; editar aquí si cambian las políticas.
 
-export const PRIVACY_MD = `# Política de Privacidad de Learnova
+export const PRIVACY_MD = `# Política de Privacidad de Aulia
 
 **Última actualización: 8 de junio de 2026**
 
-Esta Política de Privacidad describe cómo Learnova ("Learnova", "nosotros", "nuestro") recopila, usa, almacena y comparte información cuando utilizas nuestro sitio web y nuestra aplicación (en conjunto, el "Servicio"). Learnova es una plataforma educativa que crea rutas de aprendizaje personalizadas con inteligencia artificial.
+Esta Política de Privacidad describe cómo Aulia ("Aulia", "nosotros", "nuestro") recopila, usa, almacena y comparte información cuando utilizas nuestro sitio web y nuestra aplicación (en conjunto, el "Servicio"). Aulia es una plataforma educativa que crea rutas de aprendizaje personalizadas con inteligencia artificial.
 
 Al usar el Servicio aceptas las prácticas descritas en esta Política. Si no estás de acuerdo, por favor no utilices el Servicio.
 
@@ -13,7 +13,7 @@ Al usar el Servicio aceptas las prácticas descritas en esta Política. Si no es
 
 ## 1. Quiénes somos y cómo contactarnos
 
-Learnova es operado desde Chile. El responsable del tratamiento de tus datos es Learnova.
+Aulia es operado desde Chile. El responsable del tratamiento de tus datos es Aulia.
 
 - **Correo de contacto y privacidad:** igblancora@gmail.com
 
@@ -23,9 +23,9 @@ Para cualquier consulta, solicitud de acceso o eliminación de datos, escríbeno
 
 ## 2. Uso de los Servicios de la API de YouTube (declaración obligatoria)
 
-Learnova utiliza los **Servicios de la API de YouTube** ("YouTube API Services"). Concretamente, usamos la **YouTube Data API v3** para buscar y obtener metadatos públicos de videos (título, canal, duración, idioma, si tiene subtítulos) y para incrustar (embeber) videos públicos dentro de cada lección mediante el reproductor oficial de YouTube. No accedemos a tu cuenta de Google ni de YouTube, no solicitamos tu inicio de sesión de Google y no descargamos ni almacenamos los archivos de audio o video.
+Aulia utiliza los **Servicios de la API de YouTube** ("YouTube API Services"). Concretamente, usamos la **YouTube Data API v3** para buscar y obtener metadatos públicos de videos (título, canal, duración, idioma, si tiene subtítulos) y para incrustar (embeber) videos públicos dentro de cada lección mediante el reproductor oficial de YouTube. No accedemos a tu cuenta de Google ni de YouTube, no solicitamos tu inicio de sesión de Google y no descargamos ni almacenamos los archivos de audio o video.
 
-Al usar Learnova también quedas vinculado por los siguientes documentos de Google/YouTube:
+Al usar Aulia también quedas vinculado por los siguientes documentos de Google/YouTube:
 
 - **Términos de Servicio de YouTube:** https://www.youtube.com/t/terms
 - **Política de Privacidad de Google:** https://policies.google.com/privacy
@@ -44,7 +44,7 @@ Si en algún momento Google revoca o termina nuestro acceso a la API de YouTube,
 - **Contenido que generas:** tus interacciones con el tutor de IA, tus respuestas a las pruebas (quizzes) y tu progreso de aprendizaje.
 
 ### 3.2. Información de pago
-Si compras una suscripción Pro o una ruta única, el pago se procesa a través de **Flow.cl**. Learnova no almacena los datos completos de tu tarjeta; estos son tratados directamente por el procesador de pagos. Conservamos un identificador de la transacción, el estado del pago, el monto y la moneda para gestionar tu suscripción.
+Si compras una suscripción Pro o una ruta única, el pago se procesa a través de **Flow.cl**. Aulia no almacena los datos completos de tu tarjeta; estos son tratados directamente por el procesador de pagos. Conservamos un identificador de la transacción, el estado del pago, el monto y la moneda para gestionar tu suscripción.
 
 ### 3.3. Datos obtenidos de la API de YouTube
 Para cada lección recopilamos y almacenamos temporalmente metadatos públicos de los videos candidatos: el identificador del video de YouTube, el título, el nombre del canal, el idioma del audio, la duración y si tiene subtítulos. Estos datos provienen exclusivamente de la API oficial de YouTube; **no hacemos scraping** de YouTube ni de ningún otro sitio.
@@ -121,7 +121,7 @@ Usamos cookies estrictamente necesarias para mantener tu sesión iniciada (auten
 
 ## 9. Menores de edad
 
-El Servicio no está dirigido a menores de 14 años. Si eres menor de edad según la legislación de tu país, debes contar con la autorización de tu padre, madre o tutor para usar Learnova. No recopilamos conscientemente datos de menores sin dicha autorización.
+El Servicio no está dirigido a menores de 14 años. Si eres menor de edad según la legislación de tu país, debes contar con la autorización de tu padre, madre o tutor para usar Aulia. No recopilamos conscientemente datos de menores sin dicha autorización.
 
 ---
 
@@ -142,19 +142,19 @@ Podemos actualizar esta Política de Privacidad. Publicaremos la versión vigent
 ¿Preguntas sobre privacidad? Escríbenos a **igblancora@gmail.com**.
 `;
 
-export const TERMS_MD = `# Términos y Condiciones de Learnova
+export const TERMS_MD = `# Términos y Condiciones de Aulia
 
 **Última actualización: 8 de junio de 2026**
 
-Bienvenido a Learnova. Estos Términos y Condiciones ("Términos") regulan el uso de nuestro sitio web y aplicación (el "Servicio"), operados desde Chile. Al crear una cuenta o utilizar el Servicio, aceptas estos Términos. Si no estás de acuerdo, no uses el Servicio.
+Bienvenido a Aulia. Estos Términos y Condiciones ("Términos") regulan el uso de nuestro sitio web y aplicación (el "Servicio"), operados desde Chile. Al crear una cuenta o utilizar el Servicio, aceptas estos Términos. Si no estás de acuerdo, no uses el Servicio.
 
 ---
 
-## 1. Qué es Learnova
+## 1. Qué es Aulia
 
-Learnova es una plataforma educativa que utiliza inteligencia artificial para crear **rutas de aprendizaje personalizadas**: módulos paso a paso, lecciones, pruebas, un tutor de IA y videos educativos gratuitos curados desde YouTube para cada paso de tu ruta.
+Aulia es una plataforma educativa que utiliza inteligencia artificial para crear **rutas de aprendizaje personalizadas**: módulos paso a paso, lecciones, pruebas, un tutor de IA y videos educativos gratuitos curados desde YouTube para cada paso de tu ruta.
 
-Learnova es una herramienta de apoyo al aprendizaje. No es una institución educativa acreditada y no otorga títulos oficiales. El contenido generado por IA puede contener errores; úsalo con criterio.
+Aulia es una herramienta de apoyo al aprendizaje. No es una institución educativa acreditada y no otorga títulos oficiales. El contenido generado por IA puede contener errores; úsalo con criterio.
 
 ---
 
@@ -169,9 +169,9 @@ Learnova es una herramienta de apoyo al aprendizaje. No es una institución educ
 
 ## 3. Contenido de YouTube y Términos de Servicio de YouTube
 
-Learnova muestra videos de YouTube dentro de las lecciones usando el **reproductor incrustado (IFrame) oficial de YouTube** y los **Servicios de la API de YouTube** ("YouTube API Services"). Los videos son propiedad de sus respectivos creadores y de YouTube; Learnova no es dueño de ese contenido ni lo aloja.
+Aulia muestra videos de YouTube dentro de las lecciones usando el **reproductor incrustado (IFrame) oficial de YouTube** y los **Servicios de la API de YouTube** ("YouTube API Services"). Los videos son propiedad de sus respectivos creadores y de YouTube; Aulia no es dueño de ese contenido ni lo aloja.
 
-**Al usar Learnova aceptas quedar vinculado por los Términos de Servicio de YouTube, disponibles en https://www.youtube.com/t/terms.** Te recomendamos leerlos. El uso del contenido de YouTube dentro de Learnova está sujeto a dichos Términos y a la Política de Privacidad de Google (https://policies.google.com/privacy).
+**Al usar Aulia aceptas quedar vinculado por los Términos de Servicio de YouTube, disponibles en https://www.youtube.com/t/terms.** Te recomendamos leerlos. El uso del contenido de YouTube dentro de Aulia está sujeto a dichos Términos y a la Política de Privacidad de Google (https://policies.google.com/privacy).
 
 No descargamos, redistribuimos ni modificamos el contenido audiovisual de YouTube, y no permitimos descargarlo ni reproducirlo fuera del reproductor oficial.
 
@@ -179,7 +179,7 @@ No descargamos, redistribuimos ni modificamos el contenido audiovisual de YouTub
 
 ## 4. Planes, precios y pagos
 
-- Learnova ofrece un plan **Gratis**, un plan **Pro** (suscripción mensual) y la compra de **rutas únicas**.
+- Aulia ofrece un plan **Gratis**, un plan **Pro** (suscripción mensual) y la compra de **rutas únicas**.
 - Los pagos se procesan a través de **Flow.cl**. Los precios se muestran en la moneda indicada en el Servicio e incluyen los impuestos cuando corresponda.
 - Las suscripciones se renuevan automáticamente hasta que las canceles. Puedes cancelar en cualquier momento; el acceso Pro continúa hasta el final del período ya pagado.
 - Salvo que la ley aplicable disponga lo contrario, los pagos ya realizados no son reembolsables. Para consultas de facturación, escríbenos a igblancora@gmail.com.
@@ -202,7 +202,7 @@ Podemos suspender o cerrar cuentas que incumplan estos Términos.
 
 ## 6. Propiedad intelectual
 
-- La plataforma Learnova, su software, diseño, marca y los materiales generados por nuestra IA para tu ruta se entregan para tu uso personal de aprendizaje.
+- La plataforma Aulia, su software, diseño, marca y los materiales generados por nuestra IA para tu ruta se entregan para tu uso personal de aprendizaje.
 - Los videos de YouTube pertenecen a sus creadores y a YouTube. Las marcas "YouTube" y su logotipo son propiedad de Google LLC.
 - No adquieres ningún derecho de propiedad sobre el contenido de terceros mostrado en el Servicio.
 
@@ -222,7 +222,7 @@ Nos esforzamos por mantener el Servicio disponible, pero no garantizamos su func
 
 ## 9. Limitación de responsabilidad
 
-En la máxima medida permitida por la ley, Learnova se entrega "tal cual" y "según disponibilidad". No seremos responsables por daños indirectos, incidentales o consecuentes derivados del uso del Servicio o del contenido de terceros. Nada en estos Términos limita responsabilidades que no puedan excluirse legalmente.
+En la máxima medida permitida por la ley, Aulia se entrega "tal cual" y "según disponibilidad". No seremos responsables por daños indirectos, incidentales o consecuentes derivados del uso del Servicio o del contenido de terceros. Nada en estos Términos limita responsabilidades que no puedan excluirse legalmente.
 
 ---
 

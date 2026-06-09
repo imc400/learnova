@@ -1,6 +1,6 @@
 # Formulario de auditoría de YouTube — respuestas listas
 
-**Proyecto:** Learnova · Project Number `81836469922` · Project ID `learnova-498716`
+**Proyecto:** Aulia · Project Number `81836469922` · Project ID `learnova-498716`
 **Formulario:** YouTube API Services – Audit and Quota Extension Form
 **Sección 1:** "Completar una auditoría de cumplimiento para solicitar un aumento de cuota"
 
@@ -10,28 +10,28 @@
 
 ## Sección 2 — Organización y contacto
 
-Organization / Developer name: Learnova
+Organization / Developer name: Aulia
 Website / API Client URL: https://learnova.app (URL de producción en Vercel; reemplazar por el dominio en vivo al desplegar). Página que muestra la integración con YouTube: https://learnova.app/app/rutas/<id>/leccion/<id> (cada lección incrusta un video de YouTube con el reproductor IFrame oficial).
 Contact email: igblancora@gmail.com
 Country: Chile
 Google Cloud Project Number: 81836469922
 Project ID: learnova-498716
-Describe your organization's work as it relates to YouTube: 'Learnova es una plataforma educativa B2C. Usamos la YouTube Data API v3 para curar e incrustar, mediante el reproductor IFrame oficial de YouTube, el mejor video educativo gratuito para cada paso de las rutas de aprendizaje personalizadas que generamos con IA. YouTube es la fuente del componente en video de cada lección.'
+Describe your organization's work as it relates to YouTube: 'Aulia es una plataforma educativa B2C. Usamos la YouTube Data API v3 para curar e incrustar, mediante el reproductor IFrame oficial de YouTube, el mejor video educativo gratuito para cada paso de las rutas de aprendizaje personalizadas que generamos con IA. YouTube es la fuente del componente en video de cada lección.'
 
 ---
 
 ## Sección 3 — Modelo de negocio
 
 Business model: SaaS educativo por suscripción (freemium). Plan Gratis (1 ruta), plan Pro mensual (USD 15) y compra de ruta única (USD 19). Pagos procesados con Flow.cl (Chile).
-Does your API Client commercialize YouTube Data? No. No vendemos, sublicenciamos ni cobramos por los datos ni por los videos de YouTube. Los videos se muestran gratis e incrustados dentro de la experiencia educativa; lo que el usuario paga es la generación de rutas y el tutor de IA (valor independiente de Learnova). El contenido de YouTube no está detrás del paywall: se incrusta con el reproductor oficial, con ads habilitados y atribución a YouTube.
-Independent value: Learnova aporta valor propio (currículum generado por IA, pruebas, tutor en vivo, seguimiento de progreso); no es un clon de YouTube ni reemplaza a YouTube. Beneficia a los creadores de YouTube al dirigir audiencia educativa cualificada a sus videos, con atribución y enlace 'Ver en YouTube'.
+Does your API Client commercialize YouTube Data? No. No vendemos, sublicenciamos ni cobramos por los datos ni por los videos de YouTube. Los videos se muestran gratis e incrustados dentro de la experiencia educativa; lo que el usuario paga es la generación de rutas y el tutor de IA (valor independiente de Aulia). El contenido de YouTube no está detrás del paywall: se incrusta con el reproductor oficial, con ads habilitados y atribución a YouTube.
+Independent value: Aulia aporta valor propio (currículum generado por IA, pruebas, tutor en vivo, seguimiento de progreso); no es un clon de YouTube ni reemplaza a YouTube. Beneficia a los creadores de YouTube al dirigir audiencia educativa cualificada a sus videos, con atribución y enlace 'Ver en YouTube'.
 Metrics derived from YouTube data? No calculamos ni mostramos métricas propias derivadas de datos de YouTube. Solo usamos metadatos oficiales (título, canal, idioma, duración, subtítulos) para curar; cualquier estadística (views/likes) se usa transitoriamente en memoria para el ranking y no se almacena ni se muestra al usuario.
 
 ---
 
 ## Sección 4 — Clientes de API (API Clients)
 
-API Client name: Learnova (aplicación web Next.js).
+API Client name: Aulia (aplicación web Next.js).
 Where can we find the API Client? https://learnova.app — integración visible en cualquier lección: https://learnova.app/app/rutas/<pathId>/leccion/<lessonId>
 Project Number: 81836469922 · Project ID: learnova-498716
 Is this publicly or privately available? Privately (tras registro/login gratuito). Proveeremos una cuenta demo a los revisores.

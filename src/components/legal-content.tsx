@@ -54,7 +54,7 @@ const components: Components = {
   ),
 };
 
-/** Renderiza Markdown de las páginas legales con estilos de Learnova. */
+/** Renderiza Markdown de las páginas legales con estilos de Aulia. */
 export function LegalContent({ markdown }: { markdown: string }) {
   return (
     <article>
