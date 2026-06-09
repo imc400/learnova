@@ -314,7 +314,7 @@ async function curateAndSaveVideo(
  */
 export async function enqueuePathGeneration(pathId: string): Promise<void> {
   if (env.TRIGGER_SECRET_KEY) {
-    const { tasks } = await import("@trigger.dev/sdk/v3");
+    const { tasks } = await import("@trigger.dev/sdk");
     await tasks.trigger("generate-path", { pathId });
   } else if (env.NODE_ENV !== "production") {
     // Solo dev: en `next dev` el proceso sigue vivo tras responder la acción.

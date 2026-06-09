@@ -1,4 +1,4 @@
-import { task } from "@trigger.dev/sdk/v3";
+import { task } from "@trigger.dev/sdk";
 import { runPathGeneration } from "@/lib/generation/run";
 
 /** Job de generación de ruta (Opus → Sonnet → Haiku + curación de video). */
@@ -8,7 +8,7 @@ export const generatePathTask = task({
   // Backoff exponencial (evita golpear el rate limit de Anthropic en 429).
   // Seguro reintentar porque runPathGeneration es idempotente (upserts + guard).
   retry: { maxAttempts: 3, factor: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000 },
-  onFailure: async (payload: { pathId: string }, error: unknown) => {
+  onFailure: async ({ payload, error }) => {
     console.error("[trigger] generate-path falló definitivamente", {
       pathId: payload.pathId,
       error,
