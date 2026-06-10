@@ -46,6 +46,25 @@ export const lessonContentSchema = z.object({
     .describe(
       "Búsqueda de YouTube CORTA (3-6 palabras) en el idioma del estudiante, sin jerga en inglés ni signos de puntuación, optimizada para encontrar un buen tutorial en ese idioma.",
     ),
+  /** Guía del video (solo cuando se proveyó digest del video; si no, null). */
+  videoGuide: z
+    .union([
+      z.object({
+        intro: z
+          .string()
+          .describe("1-2 frases: qué verá el estudiante en el video y cómo complementa esta lección"),
+        moments: z
+          .array(
+            z.object({
+              timestampSeconds: z.number().describe("segundo EXACTO tomado del digest"),
+              label: z.string().describe("qué pasa en ese momento, 3-8 palabras"),
+            }),
+          )
+          .describe("2-4 momentos clave del video, SOLO con timestamps del digest"),
+      }),
+      z.null(),
+    ])
+    .describe("null si NO se entregó digest del video"),
 });
 export type LessonContent = z.infer<typeof lessonContentSchema>;
 
@@ -58,10 +77,33 @@ export const quizSchema = z.object({
       options: z.array(z.object({ id: z.string(), text: z.string() })),
       correctOptionIds: z.array(z.string()),
       explanation: z.string(),
+      grounding: z
+        .object({
+          source: z
+            .enum(["video", "lesson", "both"])
+            .describe("de dónde sale la respuesta: el video, el texto de la lección, o ambos"),
+          timestampSeconds: z
+            .union([z.number(), z.null()])
+            .describe("segundo del video donde se responde (SOLO si source incluye video y el dato viene de un ancla del digest; si no, null)"),
+        })
+        .describe("anclaje verificable de la pregunta"),
     }),
   ),
 });
 export type GeneratedQuiz = z.infer<typeof quizSchema>;
+
+/** Queries de video por lección, derivadas de los stubs del módulo (Haiku batch). */
+export const videoQueriesSchema = z.object({
+  queries: z.array(
+    z.object({
+      lessonIndex: z.number().int(),
+      query: z
+        .string()
+        .describe("búsqueda de YouTube corta (3-6 palabras) en el idioma del estudiante"),
+    }),
+  ),
+});
+export type VideoQueries = z.infer<typeof videoQueriesSchema>;
 
 /** Ranking de videos (lo hace Haiku con metadatos oficiales). */
 export const videoRankingSchema = z.object({

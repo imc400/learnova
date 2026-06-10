@@ -220,6 +220,33 @@ export const lessons = pgTable(
   }),
 );
 
+// ---------- Insights de video (digest de Gemini, cacheado por videoId) ----------
+// Output de Gemini/Haiku (NO metadatos crudos de la Data API → sin regla de 30
+// días). Se calcula UNA vez por video en la vida de la plataforma y se comparte
+// entre rutas y usuarios. source distingue el proveedor (gemini | metadata).
+export const videoInsights = pgTable(
+  "video_insights",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    youtubeVideoId: text("youtube_video_id").notNull(),
+    language: text("language").default("es").notNull(), // idioma del digest
+    source: text("source").default("gemini").notNull(), // gemini | metadata
+    digest: jsonb("digest").notNull(), // VideoDigest (outline, anchors, coverage…)
+    audioLanguage: text("audio_language"),
+    durationSeconds: integer("duration_seconds"),
+    model: text("model"),
+    timesReused: integer("times_reused").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    videoUniq: uniqueIndex("video_insights_video_lang_idx").on(
+      t.youtubeVideoId,
+      t.language,
+    ),
+  }),
+);
+
 // ---------- Candidatos de video de YouTube (principal + alternativas) ----------
 export const videoCandidates = pgTable(
   "video_candidates",

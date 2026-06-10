@@ -36,6 +36,9 @@ const serverSchema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(1).default("Aulia <hola@mail.aulia.ai>"),
 
+  // --- Google Gemini — digest de videos de YouTube (coherencia ToS-safe) ---
+  GEMINI_API_KEY: z.string().min(1).optional(),
+
   // --- Flow.cl (pagos) — opcional hasta fase de monetización ---
   FLOW_API_KEY: z.string().min(1).optional(),
   FLOW_SECRET_KEY: z.string().min(1).optional(),

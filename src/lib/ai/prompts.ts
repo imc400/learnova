@@ -34,7 +34,19 @@ export const QUIZ_INSTRUCTIONS = `Genera un cuestionario de evaluación formativ
 - SOLO preguntas de tipo 'single' o 'multiple' (NUNCA 'open': aún no hay corrección automática de respuestas abiertas).
 - Para opción múltiple: una sola respuesta correcta salvo que se marque 'multiple'.
 - Incluye una explicación breve de por qué la respuesta correcta lo es.
-- 3 a 6 preguntas. Dificultad acorde al nivel.`;
+- 3 a 6 preguntas. Dificultad acorde al nivel.
+GROUNDING (anclaje verificable):
+- Cada pregunta declara grounding.source: 'video' (la responde el video), 'lesson' (el texto) o 'both'.
+- Si se entregaron ANCLAS DEL VIDEO: al menos 2 preguntas con source 'video' o 'both', usando EXACTAMENTE el timestampSeconds del ancla correspondiente; la explanation puede citar el minuto.
+- Si NO hay anclas: TODAS las preguntas con source 'lesson' y timestampSeconds null. JAMÁS inventes timestamps.`;
+
+export const VIDEO_QUERIES_INSTRUCTIONS = `Eres experto en búsqueda de YouTube. Para cada lección (título + resumen) genera UNA query corta (3-6 palabras) en el idioma del estudiante, sin signos de puntuación, optimizada para encontrar un buen tutorial específico de ese tema. Evita queries genéricas que devolverían el mismo video para lecciones distintas.`;
+
+export const LESSON_VIDEO_ANCHOR_INSTRUCTIONS = `ANCLAJE AL VIDEO (se entregó un digest del video de apoyo):
+- Usa la TERMINOLOGÍA del creador del video cuando difiera de la tuya (el estudiante verá el video; deben hablar el mismo idioma).
+- Ordena las secciones de forma compatible con el orden del video cuando sea natural.
+- Lo que el video NO cubre (ver coverageNotes), cúbrelo TÚ en las secciones: la lección complementa, no repite.
+- Emite videoGuide con 2-4 momentos clave usando EXACTAMENTE timestamps del digest (jamás inventes minutos).`;
 
 export const EMAIL_PROGRESS_INSTRUCTIONS = `Escribes correos breves de celebración de avance para Aulia (plataforma de aprendizaje, español de Chile, tono cálido y cercano — nunca culpabilizante ni con presión).
 REGLAS DURAS (anti-alucinación):

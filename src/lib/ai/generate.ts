@@ -6,18 +6,39 @@ import {
   LESSON_INSTRUCTIONS,
   QUIZ_INSTRUCTIONS,
   EMAIL_PROGRESS_INSTRUCTIONS,
+  VIDEO_QUERIES_INSTRUCTIONS,
+  LESSON_VIDEO_ANCHOR_INSTRUCTIONS,
 } from "./prompts";
 import {
   pathSkeletonSchema,
   lessonContentSchema,
   quizSchema,
   emailContentSchema,
+  videoQueriesSchema,
   type Intake,
   type PathSkeleton,
   type LessonContent,
   type GeneratedQuiz,
   type EmailContent,
+  type VideoQueries,
 } from "./schemas";
+import type { VideoDigest } from "@/lib/video/insights";
+
+/** Contexto compacto del digest para inyectar en prompts (controla tokens). */
+function digestContext(digest: VideoDigest): string {
+  const mm = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+  return [
+    "DIGEST DEL VIDEO DE APOYO (datos REALES del video; única fuente para timestamps):",
+    "Temario: " + digest.outline.map((o) => `[${mm(o.timestampSeconds)}|${o.timestampSeconds}s] ${o.topic}`).join(" · "),
+    "Terminología del creador: " + digest.terminology.slice(0, 10).join(", "),
+    "Conceptos: " + digest.keyConcepts.slice(0, 8).join(", "),
+    digest.coverageNotes ? "NO cubre (compleméntalo en la lección): " + digest.coverageNotes : "",
+    "Anclas citables: " + digest.quizAnchors.slice(0, 8).map((a) => `[${a.timestampSeconds}s] ${a.fact}`).join(" · "),
+    `Idioma del audio: ${digest.audioLanguage}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
 
 /**
  * NIVEL 1 — Opus 4.8 planifica el esqueleto de la ruta.
@@ -67,7 +88,10 @@ export async function generatePathSkeleton(
   return res.parsed_output;
 }
 
-/** NIVEL 2 — Sonnet 4.6 genera el contenido de una lección. */
+/** NIVEL 2 — Sonnet 4.6 genera el contenido de una lección.
+ *  Si llega videoDigest, la lección se genera ANCLADA al video en esta misma
+ *  llamada (terminología del creador, orden compatible, videoGuide con minutos
+ *  reales) — nunca una re-pasada (costaría doble). */
 export async function generateLessonContent(args: {
   pathTitle: string;
   moduleTitle: string;
@@ -76,12 +100,16 @@ export async function generateLessonContent(args: {
   lessonSummary: string;
   level: string;
   language: string;
+  videoDigest?: VideoDigest | null;
 }): Promise<LessonContent> {
   const client = getAnthropic();
+  const hasDigest = !!args.videoDigest;
   const res = await client.messages.parse({
     model: MODELS.generator,
     max_tokens: MAX_TOKENS.generator,
-    system: cachedSystem(`${SYSTEM_PEDAGOGY}\n\n${LESSON_INSTRUCTIONS}`),
+    system: cachedSystem(
+      `${SYSTEM_PEDAGOGY}\n\n${LESSON_INSTRUCTIONS}\n\n${LESSON_VIDEO_ANCHOR_INSTRUCTIONS}`,
+    ),
     output_config: { format: zodOutputFormat(lessonContentSchema) },
     messages: [
       {
@@ -93,7 +121,57 @@ export async function generateLessonContent(args: {
           `Resumen esperado: ${args.lessonSummary}`,
           `Nivel: ${args.level} · Idioma: ${args.language}`,
           "",
+          hasDigest
+            ? digestContext(args.videoDigest!)
+            : "SIN digest de video disponible → videoGuide debe ser null.",
+          "",
           "Genera el contenido de esta lección y una buena query para buscar su video de apoyo en YouTube.",
+        ].join("\n"),
+      },
+    ],
+  });
+  if (!res.parsed_output) {
+    throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
+  }
+  const content = res.parsed_output;
+  // Cinturón y tirantes: sin digest no puede existir videoGuide; con digest,
+  // cada momento debe corresponder a un timestamp real (±60s de outline/anchors).
+  if (!hasDigest) return { ...content, videoGuide: null };
+  if (content.videoGuide) {
+    const valid = new Set([
+      ...args.videoDigest!.outline.map((o) => o.timestampSeconds),
+      ...args.videoDigest!.quizAnchors.map((a) => a.timestampSeconds),
+      ...args.videoDigest!.examples.map((e) => e.timestampSeconds),
+    ]);
+    const near = (t: number) => [...valid].some((v) => Math.abs(v - t) <= 60);
+    const moments = content.videoGuide.moments.filter((m) => near(m.timestampSeconds));
+    content.videoGuide = moments.length ? { ...content.videoGuide, moments } : null;
+  }
+  return content;
+}
+
+/** NIVEL 3 — Haiku deriva las queries de video de TODO un módulo en 1 llamada
+ *  (desde los stubs del esqueleto: el video se elige ANTES de escribir la lección). */
+export async function generateVideoQueries(args: {
+  moduleTitle: string;
+  moduleObjective: string;
+  lessons: { index: number; title: string; summary: string }[];
+  language: string;
+}): Promise<VideoQueries> {
+  const client = getAnthropic();
+  const res = await client.messages.parse({
+    model: MODELS.ranker,
+    max_tokens: MAX_TOKENS.ranker,
+    system: cachedSystem(VIDEO_QUERIES_INSTRUCTIONS),
+    output_config: { format: zodOutputFormat(videoQueriesSchema) },
+    messages: [
+      {
+        role: "user",
+        content: [
+          `Módulo: ${args.moduleTitle} — Objetivo: ${args.moduleObjective}`,
+          `Idioma del estudiante: ${args.language}`,
+          "Lecciones:",
+          ...args.lessons.map((l) => `${l.index}. ${l.title} — ${l.summary}`),
         ].join("\n"),
       },
     ],
@@ -154,14 +232,20 @@ export async function generateProgressEmail(args: {
   return res.parsed_output;
 }
 
-/** NIVEL 2 — Sonnet 4.6 genera un cuestionario para una lección. */
+/** NIVEL 2 — Sonnet 4.6 genera un cuestionario para una lección.
+ *  Corre DESPUÉS de la lección: recibe su contenido final + las anclas del
+ *  video, para que las preguntas evalúen lo que el estudiante realmente vio. */
 export async function generateQuiz(args: {
   lessonTitle: string;
   lessonSummary: string;
   level: string;
   language: string;
+  lessonContent?: LessonContent | null;
+  videoDigest?: VideoDigest | null;
+  videoDurationSeconds?: number | null;
 }): Promise<GeneratedQuiz> {
   const client = getAnthropic();
+  const anchors = args.videoDigest?.quizAnchors ?? [];
   const res = await client.messages.parse({
     model: MODELS.generator,
     max_tokens: MAX_TOKENS.generator,
@@ -170,12 +254,49 @@ export async function generateQuiz(args: {
     messages: [
       {
         role: "user",
-        content: `Lección: ${args.lessonTitle}\nResumen: ${args.lessonSummary}\nNivel: ${args.level} · Idioma: ${args.language}\n\nGenera el cuestionario.`,
+        content: [
+          `Lección: ${args.lessonTitle}`,
+          `Resumen: ${args.lessonSummary}`,
+          `Nivel: ${args.level} · Idioma: ${args.language}`,
+          args.lessonContent
+            ? "\nCONTENIDO FINAL DE LA LECCIÓN:\n" +
+              args.lessonContent.intro +
+              "\n" +
+              args.lessonContent.sections.map((s) => `## ${s.heading}\n${s.body}`).join("\n") +
+              "\nPuntos clave: " +
+              args.lessonContent.keyTakeaways.join("; ")
+            : "",
+          anchors.length
+            ? "\nANCLAS DEL VIDEO (únicos timestamps válidos):\n" +
+              anchors.map((a) => `[${a.timestampSeconds}s] ${a.fact} → ${a.questionIdea}`).join("\n")
+            : "\nSIN anclas de video → todas las preguntas con source 'lesson' y timestampSeconds null.",
+          "\nGenera el cuestionario.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
       },
     ],
   });
   if (!res.parsed_output) {
     throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
   }
-  return res.parsed_output;
+  // Post-validación de grounding (hallazgo del spike: timestamps alucinados):
+  // un timestamp es válido solo si está ±60s de un ancla real y dentro del video.
+  const quiz = res.parsed_output;
+  const validTs = new Set(anchors.map((a) => a.timestampSeconds));
+  const maxTs = args.videoDurationSeconds ? args.videoDurationSeconds + 5 : Infinity;
+  for (const q of quiz.questions) {
+    const t = q.grounding.timestampSeconds;
+    const grounded =
+      t !== null &&
+      t >= 0 &&
+      t <= maxTs &&
+      [...validTs].some((v) => Math.abs(v - t) <= 60);
+    if (q.grounding.source !== "lesson" && !grounded) {
+      q.grounding = { source: "lesson", timestampSeconds: null };
+    } else if (q.grounding.source === "lesson") {
+      q.grounding.timestampSeconds = null;
+    }
+  }
+  return quiz;
 }

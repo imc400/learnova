@@ -78,12 +78,13 @@ export default async function LessonPage({
           {detail.lesson.title}
         </h1>
 
-        {/* Video curado */}
+        {/* Video curado + guía de momentos (anclada al digest del video) */}
         {detail.videos.length > 0 && (
           <div className="mt-6">
             <YouTubeEmbed
               videos={detail.videos}
               userLanguage={detail.path.language}
+              videoGuide={content?.videoGuide ?? null}
             />
           </div>
         )}

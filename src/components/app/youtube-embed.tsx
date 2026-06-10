@@ -1,13 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { RefreshCw, ExternalLink, Languages, Youtube } from "lucide-react";
+import { RefreshCw, ExternalLink, Languages, Youtube, Clapperboard } from "lucide-react";
 
 interface Video {
   youtubeVideoId: string;
   title: string | null;
   channelTitle: string | null;
   language?: string | null;
+}
+
+export interface VideoGuide {
+  intro: string;
+  moments: { timestampSeconds: number; label: string }[];
 }
 
 const LANG_NAMES: Record<string, string> = {
@@ -33,11 +38,14 @@ const langName = (code: string) =>
 export function YouTubeEmbed({
   videos,
   userLanguage = "es",
+  videoGuide = null,
 }: {
   videos: Video[];
   userLanguage?: string;
+  videoGuide?: VideoGuide | null;
 }) {
   const [idx, setIdx] = useState(0);
+  const [startAt, setStartAt] = useState<number | null>(null);
 
   if (videos.length === 0) {
     return (
@@ -51,6 +59,8 @@ export function YouTubeEmbed({
   const target = userLanguage.slice(0, 2).toLowerCase();
   const audioLang = (current.language ?? "").slice(0, 2).toLowerCase();
   const mismatch = Boolean(audioLang) && audioLang !== target;
+  // La guía de momentos aplica al video principal (el digest se hizo sobre él).
+  const showGuide = idx === 0 && videoGuide && videoGuide.moments.length > 0;
 
   const params = new URLSearchParams({
     rel: "0",
@@ -59,12 +69,20 @@ export function YouTubeEmbed({
     hl: target, // interfaz del player en su idioma
   });
   if (mismatch) params.set("cc_load_policy", "1"); // forzar subtítulos ON
+  if (startAt !== null) {
+    // Deep-link al momento: parámetro oficial del IFrame (sin modificar el player).
+    params.set("start", String(Math.max(0, Math.floor(startAt))));
+    params.set("autoplay", "1");
+  }
+
+  const mmss = (s: number) =>
+    `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="aspect-video overflow-hidden rounded-md border border-border bg-black">
         <iframe
-          key={current.youtubeVideoId}
+          key={`${current.youtubeVideoId}-${startAt ?? "0"}`}
           className="size-full"
           src={`https://www.youtube-nocookie.com/embed/${current.youtubeVideoId}?${params.toString()}`}
           title={current.title ?? "Video de la lección"}
@@ -73,6 +91,29 @@ export function YouTubeEmbed({
           allowFullScreen
         />
       </div>
+
+      {/* Guía del video: qué verás y saltos al minuto exacto (datos del digest). */}
+      {showGuide && (
+        <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5">
+          <p className="flex items-start gap-1.5 text-xs text-foreground">
+            <Clapperboard className="mt-0.5 size-3.5 shrink-0 text-primary" />
+            <span>{videoGuide.intro}</span>
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {videoGuide.moments.map((m) => (
+              <button
+                key={m.timestampSeconds}
+                type="button"
+                onClick={() => setStartAt(m.timestampSeconds)}
+                title={`Saltar a ${mmss(m.timestampSeconds)}`}
+                className="rounded-full border border-primary/30 bg-card px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+              >
+                ▶ {mmss(m.timestampSeconds)} · {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {mismatch && (
         <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-500">

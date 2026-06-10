@@ -25,6 +25,7 @@ export default defineConfig({
           "RESEND_API_KEY",
           "EMAIL_FROM",
           "NEXT_PUBLIC_SITE_URL",
+          "GEMINI_API_KEY",
         ];
         return keys
           .filter((k) => process.env[k])

@@ -13,9 +13,11 @@ import {
   generatePathSkeleton,
   generateLessonContent,
   generateQuiz,
+  generateVideoQueries,
 } from "@/lib/ai/generate";
 import { curateVideoForLesson } from "@/lib/youtube/curate";
-import type { Intake, PathSkeleton } from "@/lib/ai/schemas";
+import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
+import type { Intake, PathSkeleton, LessonContent } from "@/lib/ai/schemas";
 import { env } from "@/lib/env";
 
 /**
@@ -179,8 +181,65 @@ export async function runPathGeneration(pathId: string): Promise<void> {
     };
 
     for (const { m, lessons } of plan) {
+      // STAGE A — queries de video del módulo entero en 1 llamada Haiku
+      // (desde los STUBS: el video se elige ANTES de escribir la lección).
+      let queryByIndex = new Map<number, string>();
+      try {
+        const q = await generateVideoQueries({
+          moduleTitle: m.title,
+          moduleObjective: m.objective,
+          lessons: lessons.map(({ ls }, i) => ({
+            index: i,
+            title: ls.title,
+            summary: ls.summary,
+          })),
+          language: intake.language,
+        });
+        queryByIndex = new Map(q.queries.map((x) => [x.lessonIndex, x.query]));
+      } catch (e) {
+        console.error(`[generation] queries de video fallaron (módulo ${m.title}):`, e);
+      }
+
       await Promise.all(
-        lessons.map(async ({ id: lessonId, ls }) => {
+        lessons.map(async ({ id: lessonId, ls }, li) => {
+          // STAGE B — curar video + digest del top-1 (con coverage gate).
+          const query = queryByIndex.get(li) ?? ls.title;
+          const vids = await curateAndSaveVideo(lessonId, query, m.objective, intake.language);
+          let topVideo = vids[0] ?? null;
+          let digest: VideoDigest | null = null;
+          if (topVideo) {
+            try {
+              let ins = await getVideoInsights({
+                videoId: topVideo.videoId,
+                lessonSummary: ls.summary,
+                language: intake.language,
+                durationSeconds: topVideo.durationSeconds ?? null,
+              });
+              // Coverage gate: si el video no cubre la lección, prueba el #2
+              // (cap 2 digests/lección) y gana el de mejor cobertura real.
+              const alt = vids[1];
+              if (ins && ins.digest.coverage < 0.5 && alt) {
+                const altIns = await getVideoInsights({
+                  videoId: alt.videoId,
+                  lessonSummary: ls.summary,
+                  language: intake.language,
+                  durationSeconds: alt.durationSeconds ?? null,
+                });
+                if (altIns && altIns.digest.coverage > ins.digest.coverage) {
+                  ins = altIns;
+                  topVideo = alt;
+                  await swapVideoRanks(lessonId, alt.videoId).catch((e) =>
+                    console.error(`[generation] swap de rank falló:`, e),
+                  );
+                }
+              }
+              digest = ins?.digest ?? null;
+            } catch (e) {
+              console.error(`[generation] digest falló (lección ${lessonId}):`, e);
+            }
+          }
+
+          // STAGE C — lección ANCLADA al video (una sola llamada Sonnet).
           const content = await generateLessonContent({
             pathTitle: skeleton.title,
             moduleTitle: m.title,
@@ -189,25 +248,26 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             lessonSummary: ls.summary,
             level: skeleton.level,
             language: intake.language,
+            videoDigest: digest,
           });
           await db
             .update(lessonsT)
             .set({ content, notes: content.keyTakeaways.join("\n• ") })
             .where(eq(lessonsT.id, lessonId));
 
-          // Quiz y video en paralelo; ninguno aborta la ruta si falla.
-          await Promise.all([
-            generateAndSaveQuiz(
-              lessonId,
-              ls.title,
-              ls.summary,
-              skeleton.level,
-              intake.language,
-            ).catch((e) =>
-              console.error(`[generation] quiz falló (lección ${lessonId}):`, e),
-            ),
-            curateAndSaveVideo(lessonId, content.videoSearchQuery, m.objective, intake.language),
-          ]);
+          // STAGE D — quiz DESPUÉS de la lección, grounded en contenido + anclas.
+          await generateAndSaveQuiz(
+            lessonId,
+            ls.title,
+            ls.summary,
+            skeleton.level,
+            intake.language,
+            content,
+            digest,
+            topVideo?.durationSeconds ?? null,
+          ).catch((e) =>
+            console.error(`[generation] quiz falló (lección ${lessonId}):`, e),
+          );
 
           done++;
           await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
@@ -262,15 +322,30 @@ export async function runPathGeneration(pathId: string): Promise<void> {
   }
 }
 
-/** Genera y guarda el quiz de una lección en una transacción (idempotente). */
+/** Genera y guarda el quiz de una lección en una transacción (idempotente).
+ *  Corre DESPUÉS de la lección: recibe contenido final + digest del video para
+ *  que las preguntas evalúen lo que el estudiante realmente vio y leyó. */
 async function generateAndSaveQuiz(
   lessonId: string,
   title: string,
   summary: string,
   level: string,
   language: string,
+  lessonContent?: LessonContent | null,
+  videoDigest?: VideoDigest | null,
+  videoDurationSeconds?: number | null,
 ) {
-  const quiz = await generateQuiz({ lessonTitle: title, lessonSummary: summary, level, language });
+  const quiz = await generateQuiz({
+    lessonTitle: title,
+    lessonSummary: summary,
+    level,
+    language,
+    lessonContent,
+    videoDigest,
+    videoDurationSeconds,
+  });
+  const mmss = (s: number) =>
+    `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
   await db.transaction(async (tx) => {
     const [qz] = await tx
       .insert(quizzesT)
@@ -290,20 +365,25 @@ async function generateAndSaveQuiz(
           prompt: q.prompt,
           options: q.options,
           correctAnswer: q.correctOptionIds,
-          explanation: q.explanation,
+          // El grounding validado viaja en la explicación (visible al corregir).
+          explanation:
+            q.grounding.timestampSeconds != null
+              ? `${q.explanation} ⏱ El video lo explica en ${mmss(q.grounding.timestampSeconds)}.`
+              : q.explanation,
         })),
       );
     }
   });
 }
 
-/** Cura y guarda videos de una lección (idempotente; nunca aborta la ruta). */
+/** Cura y guarda videos de una lección (idempotente; nunca aborta la ruta).
+ *  Devuelve los candidatos curados (rank asc) para el digest/coverage gate. */
 async function curateAndSaveVideo(
   lessonId: string,
   query: string,
   objective: string,
   language: string,
-) {
+): Promise<Awaited<ReturnType<typeof curateVideoForLesson>>> {
   try {
     const vids = await curateVideoForLesson({ query, objective, language });
     if (vids.length) {
@@ -325,9 +405,35 @@ async function curateAndSaveVideo(
         )
         .onConflictDoNothing();
     }
+    return vids;
   } catch (err) {
     console.error(`[generation] Curación de video falló (lección ${lessonId}):`, err);
+    return [];
   }
+}
+
+/** Promueve a rank 0 el video que ganó el coverage gate (swap seguro con el
+ *  índice único lesson+rank: 0→99, ganador→0, 99→1). */
+async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(videoCandidates)
+      .set({ rank: 99 })
+      .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.rank, 0)));
+    await tx
+      .update(videoCandidates)
+      .set({ rank: 0 })
+      .where(
+        and(
+          eq(videoCandidates.lessonId, lessonId),
+          eq(videoCandidates.youtubeVideoId, winnerVideoId),
+        ),
+      );
+    await tx
+      .update(videoCandidates)
+      .set({ rank: 1 })
+      .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.rank, 99)));
+  });
 }
 
 /**
