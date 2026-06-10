@@ -484,7 +484,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
 }
 
 /** Inserta un quiz (generado o cacheado) en una transacción idempotente. */
-async function saveQuizData(
+export async function saveQuizData(
   lessonId: string,
   title: string,
   quiz: GeneratedQuizData,
@@ -524,7 +524,7 @@ async function saveQuizData(
 /** Genera y guarda el quiz de una lección (devuelve el quiz para cachearlo).
  *  Corre DESPUÉS de la lección: recibe contenido final + digest del video para
  *  que las preguntas evalúen lo que el estudiante realmente vio y leyó. */
-async function generateAndSaveQuiz(
+export async function generateAndSaveQuiz(
   lessonId: string,
   title: string,
   summary: string,
@@ -549,7 +549,7 @@ async function generateAndSaveQuiz(
 
 /** Cura y guarda videos de una lección (idempotente; nunca aborta la ruta).
  *  Devuelve los candidatos curados (rank asc) para el digest/coverage gate. */
-async function curateAndSaveVideo(
+export async function curateAndSaveVideo(
   lessonId: string,
   query: string,
   objective: string,

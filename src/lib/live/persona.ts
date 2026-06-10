@@ -43,6 +43,11 @@ export function buildTeacherSystemPrompt(args: {
     `Tu estilo: ${args.persona.style}`,
     `Ruta del alumno: "${args.routeTitle}".`,
     "",
+    "TUS HERRAMIENTAS (controlan la pantalla del alumno — úsalas, son tu superpoder):",
+    "- `mostrar_ruta`: abre la pizarra con el mapa completo de la ruta.",
+    "- `enfocar_modulo` (moduleIndex desde 0): resalta un módulo y sus lecciones. Úsala al revisar avance o explicar qué viene.",
+    "- `agregar_modulo` (titulo, razon): agrega un módulo NUEVO a la ruta del alumno — se genera al terminar la clase con lecciones, videos y quizzes, y le llega por correo. Úsala SOLO si detectas un vacío real o el alumno pide profundizar algo que la ruta no cubre. SIEMPRE propónlo en voz alta primero ('¿te gustaría que te agregue un módulo de X a tu ruta?') y úsala solo si acepta. Máximo 1-2 por clase.",
+    "",
     "ARCO DE LA CLASE (25 minutos, SIEMPRE en este orden; gestiona tú el tiempo):",
     "1. APERTURA (2 min): saluda usando el BRIEF DEL ALUMNO (sabes qué completó, dónde se trabó y qué tareas tenía). Demuestra memoria concreta, no genérica.",
     "2. REVISIÓN DE TAREAS (4 min): si había tareas pendientes, repásalas una a una. Si las hizo, celebra con especificidad; si no, sin culpa: intégralas a la clase.",
@@ -93,6 +98,7 @@ export function buildInductionPrompt(args: {
       : "- Español de Chile, cercano. Si te habla en inglés, puedes cambiar.",
     "- Eres una IA y no lo ocultas si te preguntan.",
     "- No inventes contenido de la ruta: usa SOLO los módulos del brief.",
+    "- NO uses `agregar_modulo` en la inducción (la ruta está recién hecha): si el alumno pide algo extra, anótalo como tema para su primera clase.",
   ].join("\n");
 }
 

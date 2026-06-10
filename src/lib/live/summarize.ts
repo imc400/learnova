@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { db } from "@/db";
 import {
@@ -8,6 +8,8 @@ import {
   learnerProfiles,
   learningPaths,
   routeAgents,
+  lessons,
+  modules,
 } from "@/db/schema";
 import { getAnthropic, cachedSystem } from "@/lib/ai/client";
 import { MODELS } from "@/lib/ai/models";
@@ -33,6 +35,12 @@ const classSummarySchema = z.object({
       z.object({
         task: z.string().describe("Tarea concreta y accionable"),
         kind: z.enum(["retrieval", "aplicada"]),
+        relatedLessonTitle: z
+          .string()
+          .nullable()
+          .describe(
+            "Título EXACTO de la lección de la ruta que sirve de apoyo para esta tarea (de la lista LECCIONES DE LA RUTA), o null si ninguna aplica",
+          ),
       }),
     )
     .describe("Las tareas que el profesor asignó en el cierre (3-5); si no asignó, derívalas de lo trabajado"),
@@ -50,14 +58,51 @@ export async function summarizeClass(sessionId: string): Promise<string> {
   if (!session.conversationId) return "sin conversación que resumir";
   if (session.summary) return "ya resumida";
 
-  // La transcripción tarda unos segundos en procesarse en ElevenLabs.
-  let transcript: Awaited<ReturnType<typeof getConversationTranscript>> | null = null;
-  for (let i = 0; i < 6; i++) {
-    transcript = await getConversationTranscript(session.conversationId);
-    if (transcript.status === "done" && transcript.transcript.length) break;
-    await new Promise((r) => setTimeout(r, 10_000));
+  // CLAIM atómico: dos ejecuciones concurrentes (Trigger es at-least-once) no
+  // pueden duplicar tareas/correo. Solo procesa quien gana el update.
+  const claimedRows = await db
+    .update(liveSessions)
+    .set({ summary: { claiming: true }, updatedAt: new Date() })
+    .where(and(eq(liveSessions.id, sessionId), isNull(liveSessions.summary)))
+    .returning({ id: liveSessions.id });
+  if (!claimedRows.length) return "ya resumida (claim)";
+  // Si algo falla de aquí en adelante, soltamos el claim para que el
+  // reintento de Trigger pueda volver a procesar.
+  const releaseClaim = () =>
+    db
+      .update(liveSessions)
+      .set({ summary: null, updatedAt: new Date() })
+      .where(eq(liveSessions.id, sessionId))
+      .catch(() => {});
+
+  try {
+    // La transcripción tarda en procesarse en ElevenLabs (a veces minutos).
+    let transcript: Awaited<ReturnType<typeof getConversationTranscript>> | null = null;
+    for (let i = 0; i < 9; i++) {
+      transcript = await getConversationTranscript(session.conversationId);
+      if (transcript.status === "done" && transcript.transcript.length) break;
+      await new Promise((r) => setTimeout(r, 10_000));
+    }
+    if (!transcript?.transcript.length) {
+      // Lanzar (no retornar): Trigger reintenta con backoff y la transcripción
+      // suele estar lista al siguiente intento. Sin esto, el correo se pierde.
+      await releaseClaim();
+      throw new Error("transcripción aún no disponible — reintentar");
+    }
+    return await processTranscript(sessionId, session, transcript);
+  } catch (e) {
+    await releaseClaim();
+    throw e;
   }
-  if (!transcript?.transcript.length) return "transcripción no disponible";
+}
+
+type SessionRow = typeof liveSessions.$inferSelect;
+
+async function processTranscript(
+  sessionId: string,
+  session: SessionRow,
+  transcript: Awaited<ReturnType<typeof getConversationTranscript>>,
+): Promise<string> {
 
   // Duración real (más confiable que la estimada del cliente).
   if (transcript.durationSec > 0) {
@@ -72,15 +117,35 @@ export async function summarizeClass(sessionId: string): Promise<string> {
     .join("\n")
     .slice(0, 40_000);
 
+  // Lecciones reales de la ruta → recursos INTERNOS verificables por tarea
+  // (la IA solo puede citar títulos de esta lista; nada inventado).
+  const pathLessons = await db
+    .select({ id: lessons.id, title: lessons.title })
+    .from(lessons)
+    .innerJoin(modules, eq(lessons.moduleId, modules.id))
+    .where(eq(modules.pathId, session.pathId));
+  const lessonByTitle = new Map(
+    pathLessons.map((l) => [l.title.toLowerCase().trim(), l.id]),
+  );
+
   const client = getAnthropic();
   const res = await client.messages.parse({
     model: MODELS.ranker,
     max_tokens: 2000,
     system: cachedSystem(SUMMARIZE_INSTRUCTIONS),
     output_config: { format: zodOutputFormat(classSummarySchema) },
-    messages: [{ role: "user", content: `TRANSCRIPCIÓN DE LA CLASE:\n${convoText}` }],
+    messages: [
+      {
+        role: "user",
+        content: [
+          `LECCIONES DE LA RUTA (únicos títulos válidos para relatedLessonTitle):\n${pathLessons.map((l) => `- ${l.title}`).join("\n")}`,
+          `TRANSCRIPCIÓN DE LA CLASE:\n${convoText}`,
+        ].join("\n\n"),
+      },
+    ],
   });
-  if (!res.parsed_output) return "destilado falló";
+  // Lanzar para que el catch externo suelte el claim y Trigger reintente.
+  if (!res.parsed_output) throw new Error("destilado falló (parsed_output null)");
   const distilled = res.parsed_output;
 
   // Persistir: resumen en la sesión + tareas + memoria del alumno (merge).
@@ -91,13 +156,27 @@ export async function summarizeClass(sessionId: string): Promise<string> {
 
   if (distilled.homework.length) {
     await db.insert(homeworkItems).values(
-      distilled.homework.slice(0, 5).map((h) => ({
-        sessionId,
-        userId: session.userId,
-        pathId: session.pathId,
-        task: h.task,
-        kind: h.kind,
-      })),
+      distilled.homework.slice(0, 5).map((h) => {
+        // Recurso interno: link a la lección de apoyo SOLO si existe de verdad.
+        const lessonId = h.relatedLessonTitle
+          ? lessonByTitle.get(h.relatedLessonTitle.toLowerCase().trim())
+          : undefined;
+        return {
+          sessionId,
+          userId: session.userId,
+          pathId: session.pathId,
+          task: h.task,
+          kind: h.kind,
+          resources: lessonId
+            ? [
+                {
+                  title: h.relatedLessonTitle!,
+                  href: `/app/rutas/${session.pathId}/leccion/${lessonId}`,
+                },
+              ]
+            : [],
+        };
+      }),
     );
   }
 

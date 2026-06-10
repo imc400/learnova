@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { emailPreferences } from "@/db/schema";
+import { env } from "@/lib/env";
 
 /*
   Baja de correos de UN clic, sin login (CAN-SPAM / List-Unsubscribe):
@@ -27,7 +28,7 @@ function page(title: string, body: string, ok: boolean) {
 <div style="font-weight:800;font-size:22px;color:#0E5340;margin-bottom:18px">Aulia</div>
 <h1 style="font-size:22px;margin:0 0 10px">${title}</h1>
 <p style="color:#5C6B63;line-height:1.5;margin:0 0 24px">${body}</p>
-<a href="https://aulia.ai${ok ? "/app" : ""}" style="background:#1F7A63;color:#fff;text-decoration:none;border-radius:999px;padding:12px 26px;font-weight:800;display:inline-block">Volver a Aulia</a>
+<a href="${env.NEXT_PUBLIC_SITE_URL ?? "https://aulia.ai"}${ok ? "/app" : ""}" style="background:#1F7A63;color:#fff;text-decoration:none;border-radius:999px;padding:12px 26px;font-weight:800;display:inline-block">Volver a Aulia</a>
 </div></body></html>`,
     { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );

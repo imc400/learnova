@@ -240,6 +240,9 @@ export const modules = pgTable(
     title: text("title").notNull(),
     description: text("description"),
     objective: text("objective"),
+    // 'plan' = del esqueleto original; 'teacher' = agregado por el profesor IA
+    // post-clase en base al feedback del alumno (la ruta se moldea).
+    source: text("source").default("plan").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -661,6 +664,12 @@ export const liveSessions = pgTable(
     durationSec: integer("duration_sec").default(0).notNull(),
     conversationId: text("conversation_id"), // id de ElevenLabs
     summary: jsonb("summary"), // destilado post-clase (Haiku)
+    // Módulos que el profesor propuso EN VIVO (client tool agregar_modulo);
+    // al cerrar la clase se generan de verdad vía extend-path.
+    proposedModules: jsonb("proposed_modules")
+      .$type<{ title: string; reason: string }[]>()
+      .default([])
+      .notNull(),
     exitTicket: text("exit_ticket"), // respuesta metacognitiva del cierre
     reminderRunIds: jsonb("reminder_run_ids").$type<string[]>(), // para cancelar al reagendar
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -689,6 +698,12 @@ export const homeworkItems = pgTable(
       .notNull(),
     task: text("task").notNull(),
     kind: text("kind").default("retrieval").notNull(), // retrieval | aplicada
+    // Recursos INTERNOS de apoyo (links a lecciones de la ruta — jamás
+    // URLs externas inventadas por la IA).
+    resources: jsonb("resources")
+      .$type<{ title: string; href: string }[]>()
+      .default([])
+      .notNull(),
     done: boolean("done").default(false).notNull(),
     reviewedInSessionId: uuid("reviewed_in_session_id").references(
       () => liveSessions.id,

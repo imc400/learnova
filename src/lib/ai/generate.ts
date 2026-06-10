@@ -11,6 +11,7 @@ import {
 } from "./prompts";
 import {
   pathSkeletonSchema,
+  moduleStubSchema,
   lessonContentSchema,
   quizSchema,
   emailContentSchema,
@@ -84,6 +85,54 @@ export async function generatePathSkeleton(
   });
   if (!res.parsed_output) {
     throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
+  }
+  return res.parsed_output;
+}
+
+/**
+ * Módulo de REFUERZO diseñado post-clase: el profesor lo propuso en vivo en
+ * base al feedback del alumno. Sonnet diseña UN módulo (3-4 lecciones) que
+ * encaja con la ruta existente sin repetir lo ya cubierto.
+ */
+export async function generateModuleSkeleton(args: {
+  pathTitle: string;
+  goal: string;
+  level: string;
+  language: string;
+  existingModules: string[];
+  requestedTitle: string;
+  reason: string;
+  struggles?: string[];
+}): Promise<PathSkeleton["modules"][number]> {
+  const client = getAnthropic();
+  const res = await client.messages.parse({
+    model: MODELS.generator,
+    max_tokens: 2500,
+    system: cachedSystem(SYSTEM_PEDAGOGY),
+    output_config: { format: zodOutputFormat(moduleStubSchema) },
+    messages: [
+      {
+        role: "user",
+        content: [
+          `El profesor particular de la ruta "${args.pathTitle}" (nivel ${args.level}) decidió EN CLASE agregar un módulo de refuerzo para este alumno.`,
+          `- Módulo pedido por el profesor: "${args.requestedTitle}"`,
+          `- Por qué: ${args.reason}`,
+          args.struggles?.length
+            ? `- Dificultades recientes del alumno: ${args.struggles.join("; ")}`
+            : "",
+          `- Meta del alumno: ${args.goal}`,
+          `- Módulos que la ruta YA tiene (no los repitas): ${args.existingModules.join(" · ")}`,
+          `- Idioma de salida: ${args.language}`,
+          "",
+          "Diseña UN módulo con 3-4 lecciones específicas y accionables que ataquen exactamente esa necesidad. Resúmenes de lección concretos (sirven para curar el video de apoyo).",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    ],
+  });
+  if (!res.parsed_output) {
+    throw new Error("[ai] módulo de refuerzo: parsed_output null.");
   }
   return res.parsed_output;
 }

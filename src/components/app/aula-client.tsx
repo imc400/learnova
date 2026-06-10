@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
-import { Mic, MicOff, PhoneOff, GraduationCap, Loader2 } from "lucide-react";
+import { Mic, MicOff, PhoneOff, GraduationCap, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { endClassAction } from "@/server/actions/live";
+import {
+  endClassAction,
+  proposeModuleAction,
+  attachConversationAction,
+} from "@/server/actions/live";
 
 /*
   Cliente del aula: conversación de voz con el profesor IA.
@@ -54,16 +58,52 @@ function AulaInner({
   // PIZARRA: el profesor la abre y enfoca módulos con sus client tools.
   const [boardVisible, setBoardVisible] = useState(false);
   const [focusedModule, setFocusedModule] = useState<number | null>(null);
+  // Módulos que el profesor agregó EN VIVO (se generan al cerrar la clase).
+  const [addedModules, setAddedModules] = useState<string[]>([]);
+  const [reconnecting, setReconnecting] = useState(false);
   const startedAtRef = useRef<number | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const endedRef = useRef(false);
+  // true cuando el cierre es INTENCIONAL (botón Terminar / corte de 30 min):
+  // una desconexión inesperada (WiFi) intenta reconectar antes de rendirse.
+  const endRequestedRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const startSessionRef = useRef<(() => Promise<void>) | null>(null);
 
   const conversation = useConversation({
     onConnect: (props: { conversationId?: string }) => {
-      startedAtRef.current = Date.now();
-      if (props?.conversationId) conversationIdRef.current = props.conversationId;
+      startedAtRef.current = startedAtRef.current ?? Date.now();
+      reconnectAttemptsRef.current = 0;
+      setReconnecting(false);
+      if (props?.conversationId) {
+        conversationIdRef.current = props.conversationId;
+        // Persistir YA: si el alumno refresca o se cae el WiFi, el resumen
+        // post-clase igual encuentra la transcripción.
+        void attachConversationAction(sessionId, props.conversationId).catch(
+          () => {},
+        );
+      }
     },
     onDisconnect: () => {
+      // Cierre pedido por el usuario o timer → ritual normal.
+      if (endRequestedRef.current || endedRef.current) {
+        void finishClass();
+        return;
+      }
+      // Desconexión INESPERADA (WiFi inestable): hasta 2 reintentos con pausa
+      // antes de cerrar la clase de verdad.
+      if (reconnectAttemptsRef.current < 2 && startSessionRef.current) {
+        reconnectAttemptsRef.current += 1;
+        setReconnecting(true);
+        setTimeout(() => {
+          if (endedRef.current) return;
+          void startSessionRef.current?.().catch(() => {
+            setReconnecting(false);
+            void finishClass();
+          });
+        }, 2500);
+        return;
+      }
       void finishClass();
     },
     onError: (message) => {
@@ -93,12 +133,11 @@ function AulaInner({
     router.push(`/app/rutas/${pathId}?clase=finalizada`);
   }, [sessionId, pathId, router]);
 
-  // Conexión al montar.
+  // Conexión al montar (y reconexión ante caídas de WiFi).
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        await conversation.startSession({
+    const start = async () => {
+      await conversation.startSession({
           signedUrl,
           connectionType: "websocket",
           overrides: {
@@ -116,27 +155,55 @@ function AulaInner({
               return "Pizarra visible con el mapa completo de la ruta.";
             },
             enfocar_modulo: async (params: { moduleIndex?: number }) => {
-              const idx = Number(params?.moduleIndex ?? 0);
+              const raw = Number(params?.moduleIndex ?? 0);
+              // Clamp al rango real: el profesor a veces cuenta desde 1.
+              const idx = Math.max(
+                0,
+                Math.min(Number.isFinite(raw) ? raw : 0, outline.length - 1),
+              );
               setBoardVisible(true);
-              setFocusedModule(Number.isFinite(idx) ? idx : 0);
-              return `Módulo ${idx + 1} enfocado en la pizarra.`;
+              setFocusedModule(idx);
+              return `Módulo ${idx + 1} (${outline[idx]?.title ?? ""}) enfocado en la pizarra.`;
+            },
+            agregar_modulo: async (params: { titulo?: string; razon?: string }) => {
+              const titulo = String(params?.titulo ?? "").trim();
+              const razon = String(params?.razon ?? "").trim();
+              if (!titulo) return "Falta el título del módulo.";
+              try {
+                const res = await proposeModuleAction(sessionId, titulo, razon);
+                if (res.ok) {
+                  setBoardVisible(true);
+                  setAddedModules((prev) =>
+                    prev.includes(titulo) ? prev : [...prev, titulo],
+                  );
+                  return `Listo: el módulo "${titulo}" quedó agendado. Se generará al terminar la clase y al alumno le llegará un correo cuando esté disponible.`;
+                }
+                return `No se pudo agendar: ${res.message}.`;
+              } catch {
+                return "Hubo un error al agendar el módulo. Continúa la clase y dile al alumno que lo intentaremos de nuevo.";
+              }
             },
           },
         });
         if (!cancelled && !conversationIdRef.current) {
           // Fallback: el id también está disponible en el objeto de conversación.
           const maybeId = (conversation as { getId?: () => string | undefined }).getId?.();
-          if (maybeId) conversationIdRef.current = maybeId;
+          if (maybeId) {
+            conversationIdRef.current = maybeId;
+            void attachConversationAction(sessionId, maybeId).catch(() => {});
+          }
         }
-      } catch (e) {
-        console.error("[aula] no se pudo iniciar:", e);
-        setError(
-          "No pudimos iniciar la clase. Revisa el permiso del micrófono y vuelve a intentarlo.",
-        );
-      }
-    })();
+    };
+    startSessionRef.current = start;
+    start().catch((e) => {
+      console.error("[aula] no se pudo iniciar:", e);
+      setError(
+        "No pudimos iniciar la clase. Revisa el permiso del micrófono y vuelve a intentarlo.",
+      );
+    });
     return () => {
       cancelled = true;
+      endRequestedRef.current = true;
       void conversation.endSession();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -149,6 +216,7 @@ function AulaInner({
       const sec = Math.round((Date.now() - startedAtRef.current) / 1000);
       setElapsed(sec);
       if (sec >= MAX_CLASS_SECONDS) {
+        endRequestedRef.current = true;
         void conversation.endSession();
       }
     }, 1000);
@@ -190,6 +258,11 @@ function AulaInner({
             <Loader2 className="size-4 animate-spin" /> Cerrando la clase y
             preparando tu resumen…
           </span>
+        ) : reconnecting ? (
+          <span className="flex items-center gap-2 text-accent-foreground">
+            <Loader2 className="size-4 animate-spin" /> Se cortó la conexión —
+            reconectando con tu profesor…
+          </span>
         ) : !connected ? (
           <span className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="size-4 animate-spin" /> Conectando con tu
@@ -222,7 +295,10 @@ function AulaInner({
         <Button
           type="button"
           variant="primary"
-          onClick={() => void conversation.endSession()}
+          onClick={() => {
+            endRequestedRef.current = true;
+            void conversation.endSession();
+          }}
           disabled={ending}
           className="bg-destructive text-white hover:bg-destructive/90"
         >
@@ -271,6 +347,19 @@ function AulaInner({
               </li>
             );
           })}
+          {addedModules.map((t, i) => (
+            <li
+              key={`added-${i}`}
+              className="rounded-lg border border-dashed border-primary/50 bg-primary/5 px-3 py-2"
+            >
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-primary">
+                <Sparkles className="size-3.5" /> {outline.length + i + 1}. {t}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Nuevo — tu profesor lo está agregando a tu ruta
+              </p>
+            </li>
+          ))}
         </ol>
       </aside>
     )}

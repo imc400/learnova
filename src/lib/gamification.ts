@@ -284,7 +284,8 @@ async function applyXpToProfile(
   const [before] = await tx
     .select({ totalXp: profiles.totalXp, level: profiles.level })
     .from(profiles)
-    .where(eq(profiles.id, userId));
+    .where(eq(profiles.id, userId))
+    .for("update"); // lock: dos completions concurrentes no pisan el nivel
   const prevLevel = before?.level ?? 1;
 
   if (gained <= 0) {
@@ -300,7 +301,10 @@ async function applyXpToProfile(
   const totalXp = after?.totalXp ?? gained;
   const level = levelForXp(totalXp);
   if (level !== prevLevel) {
-    await tx.update(profiles).set({ level }).where(eq(profiles.id, userId));
+    await tx
+      .update(profiles)
+      .set({ level, updatedAt: new Date() })
+      .where(eq(profiles.id, userId));
   }
   return { totalXp, level, levelUp: level > prevLevel ? level : null };
 }

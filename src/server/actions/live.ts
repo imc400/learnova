@@ -4,7 +4,14 @@ import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { learningPaths, liveSessions, routeAgents, skeletonCache } from "@/db/schema";
+import {
+  learningPaths,
+  liveSessions,
+  routeAgents,
+  skeletonCache,
+  homeworkItems,
+} from "@/db/schema";
+import { revalidatePath } from "next/cache";
 import { env } from "@/lib/env";
 import { getOrCreateRouteAgent } from "@/lib/live/persona";
 import { createVoiceAgent } from "@/lib/live/provider";
@@ -28,7 +35,7 @@ export async function startClassAction(
   // segundo argumento — cualquier cosa que no sea "induction" es clase normal.
   const sessionKind = kind === "induction" ? "induction" : "class";
   if (env.LIVE_CLASSES_ENABLED === "false") {
-    throw new Error("Las clases en vivo están temporalmente desactivadas.");
+    redirect(`/app/rutas/${pathId}?clase_error=desactivadas`);
   }
   const supabase = await createClient();
   const {
@@ -47,7 +54,21 @@ export async function startClassAction(
     .from(learningPaths)
     .where(and(eq(learningPaths.id, pathId), eq(learningPaths.userId, user.id)))
     .limit(1);
-  if (!path) throw new Error("Ruta no encontrada");
+  if (!path) redirect("/app");
+
+  // SANEAMIENTO: sesiones in_progress huérfanas (>35 min = el cliente murió
+  // sin cerrar). Se marcan missed con su duración real estimada — sin esto
+  // bloquean el cupo semanal para siempre.
+  await db
+    .update(liveSessions)
+    .set({ status: "missed", endedAt: new Date(), updatedAt: new Date() })
+    .where(
+      and(
+        eq(liveSessions.userId, user.id),
+        eq(liveSessions.status, "in_progress"),
+        sql`${liveSessions.createdAt} < now() - interval '35 minutes'`,
+      ),
+    );
 
   // ¿Sesión en curso reciente? Reúsala (refresh del aula, doble clic).
   const [open] = await db
@@ -64,26 +85,28 @@ export async function startClassAction(
     .limit(1);
   if (open) redirect(`/app/aula/${open.id}`);
 
-  // Cupo semanal en minutos (completed + in_progress de los últimos 7 días).
+  // Cupo semanal en minutos: completadas por duración real + in_progress
+  // recientes por minutos transcurridos (no 30 fijos — una inducción de 10 min
+  // no puede comerse el cupo entero).
   const weekAgo = new Date(Date.now() - 7 * 86_400_000);
   const [used] = await db
     .select({
-      sec: sql<number>`coalesce(sum(${liveSessions.durationSec}), 0)::int`,
-      inProgress: sql<number>`count(*) filter (where ${liveSessions.status} = 'in_progress')::int`,
+      sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
+      inProgressSec: sql<number>`coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), ${MAX_CLASS_MINUTES * 60})) filter (where ${liveSessions.status} = 'in_progress'), 0)::int`,
     })
     .from(liveSessions)
     .where(
       and(
         eq(liveSessions.userId, user.id),
         gte(liveSessions.createdAt, weekAgo),
-        inArray(liveSessions.status, ["completed", "in_progress"]),
+        inArray(liveSessions.status, ["completed", "missed", "in_progress"]),
       ),
     );
-  const usedMin = Math.ceil(Number(used?.sec ?? 0) / 60) + Number(used?.inProgress ?? 0) * MAX_CLASS_MINUTES;
+  const usedMin = Math.ceil(
+    (Number(used?.sec ?? 0) + Number(used?.inProgressSec ?? 0)) / 60,
+  );
   if (usedMin >= WEEKLY_MINUTES_LIMIT) {
-    throw new Error(
-      "Alcanzaste tu cupo de clases de esta semana. Vuelve la próxima — tu profesor te estará esperando.",
-    );
+    redirect(`/app/rutas/${pathId}?clase_error=cupo`);
   }
 
   // Persona del profesor (por esqueleto canónico; fallback por ruta).
@@ -101,18 +124,25 @@ export async function startClassAction(
   };
   const agent = await getOrCreateRouteAgent(cacheKey, skeleton, path.language);
   if (!agent.approved) {
-    throw new Error("El profesor de esta ruta está en revisión. Intenta más tarde.");
+    redirect(`/app/rutas/${pathId}?clase_error=revision`);
   }
 
-  // Agente de voz lazy (una vez por persona).
+  // Agente de voz lazy (una vez por persona). Si ElevenLabs falla, el usuario
+  // recibe un banner claro — jamás una página de error cruda.
   if (!agent.elevenlabsAgentId) {
-    const elId = await createVoiceAgent({
-      name: agent.name,
-      systemPrompt: agent.systemPrompt,
-      greeting: agent.greeting,
-      language: path.language,
-      voiceId: agent.voiceId ?? undefined,
-    });
+    let elId: string;
+    try {
+      elId = await createVoiceAgent({
+        name: agent.name,
+        systemPrompt: agent.systemPrompt,
+        greeting: agent.greeting,
+        language: path.language,
+        voiceId: agent.voiceId ?? undefined,
+      });
+    } catch (e) {
+      console.error("[live] creación del agente de voz falló:", e);
+      redirect(`/app/rutas/${pathId}?clase_error=voz`);
+    }
     await db
       .update(routeAgents)
       .set({ elevenlabsAgentId: elId, updatedAt: new Date() })
@@ -134,8 +164,104 @@ export async function startClassAction(
 }
 
 /**
+ * El profesor propuso EN VIVO agregar un módulo (client tool agregar_modulo).
+ * Se registra en la sesión; al cerrar la clase se genera de verdad.
+ */
+export async function proposeModuleAction(
+  sessionId: string,
+  title: string,
+  reason: string,
+): Promise<{ ok: boolean; message: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, message: "No autenticado" };
+
+  const cleanTitle = String(title ?? "").trim().slice(0, 120);
+  const cleanReason = String(reason ?? "").trim().slice(0, 400);
+  if (cleanTitle.length < 3) return { ok: false, message: "Título inválido" };
+
+  const [session] = await db
+    .select({ id: liveSessions.id, proposed: liveSessions.proposedModules })
+    .from(liveSessions)
+    .where(
+      and(
+        eq(liveSessions.id, sessionId),
+        eq(liveSessions.userId, user.id),
+        eq(liveSessions.status, "in_progress"),
+      ),
+    )
+    .limit(1);
+  if (!session) return { ok: false, message: "Sesión no encontrada" };
+
+  const proposed = session.proposed ?? [];
+  if (proposed.length >= 2) {
+    return { ok: false, message: "Máximo 2 módulos por clase" };
+  }
+  if (proposed.some((p) => p.title.toLowerCase() === cleanTitle.toLowerCase())) {
+    return { ok: true, message: "Ya estaba propuesto" };
+  }
+
+  await db
+    .update(liveSessions)
+    .set({
+      proposedModules: [...proposed, { title: cleanTitle, reason: cleanReason }],
+      updatedAt: new Date(),
+    })
+    .where(eq(liveSessions.id, session.id));
+  return { ok: true, message: `Módulo "${cleanTitle}" agendado` };
+}
+
+/**
+ * Persiste el conversationId APENAS conecta el aula (no solo al cerrar):
+ * si el alumno refresca o pierde la conexión, el resumen post-clase igual
+ * encuentra la transcripción.
+ */
+export async function attachConversationAction(
+  sessionId: string,
+  conversationId: string,
+) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return;
+  if (!conversationId || conversationId.length > 200) return;
+
+  await db
+    .update(liveSessions)
+    .set({ conversationId, updatedAt: new Date() })
+    .where(
+      and(
+        eq(liveSessions.id, sessionId),
+        eq(liveSessions.userId, user.id),
+        eq(liveSessions.status, "in_progress"),
+      ),
+    );
+}
+
+/** Marca/desmarca una tarea del profesor como hecha (desde la ruta). */
+export async function toggleHomeworkAction(itemId: string, formData?: FormData) {
+  void formData;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const [updated] = await db
+    .update(homeworkItems)
+    .set({ done: sql`not ${homeworkItems.done}` })
+    .where(and(eq(homeworkItems.id, itemId), eq(homeworkItems.userId, user.id)))
+    .returning({ pathId: homeworkItems.pathId });
+  if (updated) revalidatePath(`/app/rutas/${updated.pathId}`);
+}
+
+/**
  * Cierra la clase: registra duración y conversación, y dispara el resumen
- * post-clase (tareas + correo). Idempotente: solo transiciona in_progress.
+ * post-clase (tareas + correo) y la generación de los módulos que el profesor
+ * propuso en vivo. Idempotente: solo transiciona in_progress.
  */
 export async function endClassAction(
   sessionId: string,
@@ -153,7 +279,8 @@ export async function endClassAction(
     .set({
       status: "completed",
       endedAt: new Date(),
-      conversationId,
+      // null al cerrar NO pisa el id persistido por attachConversationAction.
+      ...(conversationId ? { conversationId } : {}),
       durationSec: Math.min(Math.max(0, Math.round(durationSec)), MAX_CLASS_MINUTES * 60),
       updatedAt: new Date(),
     })
@@ -164,21 +291,39 @@ export async function endClassAction(
         eq(liveSessions.status, "in_progress"),
       ),
     )
-    .returning({ id: liveSessions.id });
+    .returning({ id: liveSessions.id, pathId: liveSessions.pathId, proposedModules: liveSessions.proposedModules });
   if (!updated.length) return; // ya cerrada (idempotente)
+  const closed = updated[0]!;
 
-  // Resumen + tareas + correo, en background (nunca bloquea el cierre).
+  // Resumen + módulos propuestos, en background (nunca bloquea el cierre).
   try {
     if (env.TRIGGER_SECRET_KEY) {
       const { tasks } = await import("@trigger.dev/sdk");
       await tasks.trigger("summarize-class", { sessionId });
+      for (const p of closed.proposedModules ?? []) {
+        await tasks.trigger("extend-path", {
+          pathId: closed.pathId,
+          sessionId,
+          title: p.title,
+          reason: p.reason,
+        });
+      }
     } else if (env.NODE_ENV !== "production") {
       const { summarizeClass } = await import("@/lib/live/summarize");
       void summarizeClass(sessionId).catch((e) =>
         console.error("[live] resumen inline falló:", e),
       );
+      const { extendPathWithModule } = await import("@/lib/generation/extend");
+      for (const p of closed.proposedModules ?? []) {
+        void extendPathWithModule({
+          pathId: closed.pathId,
+          sessionId,
+          requestedTitle: p.title,
+          reason: p.reason,
+        }).catch((e) => console.error("[live] extensión inline falló:", e));
+      }
     }
   } catch (e) {
-    console.error("[live] no se pudo encolar el resumen:", e);
+    console.error("[live] no se pudo encolar el post-clase:", e);
   }
 }

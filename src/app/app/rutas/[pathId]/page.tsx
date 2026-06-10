@@ -12,12 +12,12 @@ import {
   Sparkles,
   GraduationCap,
 } from "lucide-react";
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { moduleRatings } from "@/db/schema";
+import { moduleRatings, homeworkItems } from "@/db/schema";
 import { getPathTree } from "@/server/queries/paths";
-import { startClassAction } from "@/server/actions/live";
+import { startClassAction, toggleHomeworkAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
 import { GeneratingState } from "@/components/app/generating-state";
 
@@ -29,12 +29,23 @@ import { NextStepCard } from "@/components/app/next-step-card";
 import { ModuleRating } from "@/components/app/module-rating";
 import { Badge } from "@/components/ui/badge";
 
+/** Mensajes amigables para errores al iniciar clase (vía ?clase_error=). */
+const CLASS_ERRORS: Record<string, string> = {
+  cupo: "Alcanzaste tu cupo de clases de esta semana. Vuelve la próxima — tu profesor te estará esperando.",
+  voz: "No pudimos preparar la voz de tu profesor. Intenta de nuevo en unos minutos.",
+  revision: "El profesor de esta ruta está en revisión. Intenta más tarde.",
+  desactivadas: "Las clases en vivo están temporalmente desactivadas.",
+};
+
 export default async function PathPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ pathId: string }>;
+  searchParams: Promise<{ clase?: string; clase_error?: string }>;
 }) {
   const { pathId } = await params;
+  const sp = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -51,7 +62,22 @@ export default async function PathPage({
     .where(and(eq(moduleRatings.userId, user.id), eq(moduleRatings.pathId, pathId)));
   const ratingByModule = new Map(myRatings.map((r) => [r.moduleId, r.rating]));
 
-  if (path.status === "generating") {
+  // Tareas asignadas por el profesor en clase (pendientes primero).
+  const homework = await db
+    .select()
+    .from(homeworkItems)
+    .where(and(eq(homeworkItems.userId, user.id), eq(homeworkItems.pathId, pathId)))
+    .orderBy(asc(homeworkItems.done), desc(homeworkItems.createdAt))
+    .limit(8);
+
+  // Vigilante: una generación de >50 min está muerta (el job marca failed al
+  // agotar reintentos, pero si ni eso corrió, la UI no gira para siempre).
+  const generationStale =
+    path.status === "generating" &&
+    path.generationStartedAt &&
+    Date.now() - path.generationStartedAt.getTime() > 50 * 60_000;
+
+  if (path.status === "generating" && !generationStale) {
     return (
       <div className="mx-auto max-w-2xl">
         <GeneratingState
@@ -69,7 +95,7 @@ export default async function PathPage({
     );
   }
 
-  if (path.status === "failed") {
+  if (path.status === "failed" || generationStale) {
     return (
       <div className="mx-auto max-w-xl rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
         <AlertTriangle className="mx-auto size-8 text-destructive" />
@@ -110,6 +136,26 @@ export default async function PathPage({
           ) : null}
         </div>
       </div>
+
+      {/* Post-clase: celebración con el resumen en camino */}
+      {sp.clase === "finalizada" && (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <GraduationCap className="mt-0.5 size-5 shrink-0 text-primary" />
+          <div>
+            <p className="text-sm font-semibold">¡Buena clase! 🎉</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              Tu profesor está preparando el resumen y tus tareas — te llegarán
+              por correo en unos minutos y aparecerán aquí mismo.
+            </p>
+          </div>
+        </div>
+      )}
+      {sp.clase_error && CLASS_ERRORS[sp.clase_error] && (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-accent bg-accent/20 p-4">
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-accent-foreground" />
+          <p className="text-sm font-medium">{CLASS_ERRORS[sp.clase_error]}</p>
+        </div>
+      )}
 
       {path.generationProgress < 100 && (
         <RouteProgressLive
@@ -216,14 +262,68 @@ export default async function PathPage({
           );
         })()}
 
+      {/* Tareas del profesor (asignadas en clase) con recursos de apoyo */}
+      {homework.length > 0 && (
+        <div className="mt-6 rounded-xl border border-border bg-card p-5">
+          <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            📝 Tareas de tu profesor
+          </p>
+          <ul className="mt-3 space-y-2.5">
+            {homework.map((h) => (
+              <li key={h.id} className="flex items-start gap-3">
+                <form action={toggleHomeworkAction.bind(null, h.id)}>
+                  <button
+                    type="submit"
+                    aria-label={h.done ? "Marcar como pendiente" : "Marcar como hecha"}
+                    className={`grid size-5 place-items-center rounded border transition-colors ${
+                      h.done
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-input bg-card hover:border-primary"
+                    }`}
+                  >
+                    {h.done && <CheckCircle2 className="size-3.5" />}
+                  </button>
+                </form>
+                <div className="min-w-0 flex-1">
+                  <p
+                    className={`text-sm ${
+                      h.done ? "text-muted-foreground line-through" : "font-medium"
+                    }`}
+                  >
+                    {h.task}
+                  </p>
+                  {(h.resources ?? []).map((r, ri) => (
+                    <Link
+                      key={ri}
+                      href={r.href}
+                      className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      <PlayCircle className="size-3" /> Apóyate en: {r.title}
+                    </Link>
+                  ))}
+                </div>
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {h.kind === "aplicada" ? "Práctica" : "Repaso"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mt-8 space-y-6">
         {path.modules.map((m, mi) => {
           const remaining = m.lessons.length - m.completedCount;
           return (
             <section key={m.id}>
               <div className="flex items-baseline justify-between gap-3">
-                <span className="font-display text-sm font-semibold text-primary">
+                <span className="flex items-center gap-2 font-display text-sm font-semibold text-primary">
                   Módulo {mi + 1}
+                  {m.source === "teacher" && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+                      <Sparkles className="size-3" /> De tu profesor
+                    </span>
+                  )}
                 </span>
                 {m.lessons.length > 0 && (
                   <span className="flex items-center gap-3">

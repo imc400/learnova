@@ -11,6 +11,57 @@ const EL_BASE = "https://api.elevenlabs.io/v1";
 /** Voz por defecto validada en el spike: Cristian Cornejo (chileno, multilingüe). */
 export const DEFAULT_VOICE_ID = "ClNifCEVq1smkl4M3aTk";
 
+/**
+ * Herramientas del profesor que corren en el NAVEGADOR del alumno (client
+ * tools): la pizarra y el moldear de la ruta. Única fuente de verdad — las
+ * usan createVoiceAgent y el script de parcheo de agentes existentes.
+ */
+export const VOICE_AGENT_TOOLS = [
+  {
+    type: "client",
+    name: "mostrar_ruta",
+    description:
+      "Muestra el mapa completo de la ruta en la pantalla del alumno (la pizarra). Úsala cuando vayas a recorrer la ruta o quieras que vea la estructura completa.",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    type: "client",
+    name: "enfocar_modulo",
+    description:
+      "Resalta UN módulo en la pizarra del alumno y muestra sus lecciones. Úsala cuando expliques un módulo específico.",
+    parameters: {
+      type: "object",
+      properties: {
+        moduleIndex: {
+          type: "integer",
+          description: "Índice del módulo desde 0 (módulo 1 = 0)",
+        },
+      },
+      required: ["moduleIndex"],
+    },
+  },
+  {
+    type: "client",
+    name: "agregar_modulo",
+    description:
+      "Agrega un módulo NUEVO a la ruta del alumno (se genera al terminar la clase, con lecciones, videos y quizzes). Úsala SOLO cuando detectes un vacío real o el alumno pida profundizar algo que la ruta no cubre, y SIEMPRE anunciándolo en voz alta antes.",
+    parameters: {
+      type: "object",
+      properties: {
+        titulo: {
+          type: "string",
+          description: "Título corto del módulo a agregar, ej: 'Iluminación con luz natural'",
+        },
+        razon: {
+          type: "string",
+          description: "Por qué este alumno lo necesita (1-2 frases, basadas en la clase)",
+        },
+      },
+      required: ["titulo", "razon"],
+    },
+  },
+];
+
 function headers() {
   if (!env.ELEVENLABS_API_KEY) throw new Error("[live] Falta ELEVENLABS_API_KEY");
   return {
@@ -42,33 +93,7 @@ export async function createVoiceAgent(args: {
           prompt: {
             prompt: args.systemPrompt,
             llm: "claude-sonnet-4-6",
-            // Herramientas de PIZARRA: corren en el navegador del alumno
-            // (client tools) y mueven la UI mientras el profesor habla.
-            tools: [
-              {
-                type: "client",
-                name: "mostrar_ruta",
-                description:
-                  "Muestra el mapa completo de la ruta en la pantalla del alumno (la pizarra). Úsala cuando vayas a recorrer la ruta o quieras que vea la estructura completa.",
-                parameters: { type: "object", properties: {}, required: [] },
-              },
-              {
-                type: "client",
-                name: "enfocar_modulo",
-                description:
-                  "Resalta UN módulo en la pizarra del alumno y muestra sus lecciones. Úsala cuando expliques un módulo específico.",
-                parameters: {
-                  type: "object",
-                  properties: {
-                    moduleIndex: {
-                      type: "integer",
-                      description: "Índice del módulo desde 0 (módulo 1 = 0)",
-                    },
-                  },
-                  required: ["moduleIndex"],
-                },
-              },
-            ],
+            tools: VOICE_AGENT_TOOLS,
           },
           first_message: args.greeting,
         },

@@ -22,7 +22,7 @@ function formatEta(
 ): string | null {
   if (!total || !startedAtMs || !done || done < 1) return null;
   const elapsed = (Date.now() - startedAtMs) / 1000;
-  if (elapsed < 5) return null;
+  if (elapsed < 2) return null;
   const rate = done / elapsed; // lecciones por segundo
   if (rate <= 0) return null;
   const remaining = ((total - done) / rate) * 1.2;

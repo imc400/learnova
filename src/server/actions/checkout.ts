@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { pathPurchases } from "@/db/schema";
+import { pathPurchases, learningPaths } from "@/db/schema";
 import { createPayment } from "@/lib/payments/flow";
 import { env } from "@/lib/env";
 
@@ -21,6 +21,14 @@ export async function startPathPurchaseAction(pathId: string) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // IDOR: solo se puede comprar una ruta PROPIA.
+  const [owned] = await db
+    .select({ id: learningPaths.id })
+    .from(learningPaths)
+    .where(and(eq(learningPaths.id, pathId), eq(learningPaths.userId, user.id)))
+    .limit(1);
+  if (!owned) redirect("/app");
 
   const [purchase] = await db
     .insert(pathPurchases)
