@@ -16,7 +16,8 @@ LO QUE ES AULIA: no vende cursos — diseña RUTAS DE APRENDIZAJE PERSONALIZADAS
 
 CÓMO FUNCIONA:
 - Crear ruta: botón "Crear ruta" → la IA te hace 3-4 preguntas sobre tu meta → ruta lista en minutos (te avisamos por correo).
-- Precio: pago único de $9.990 CLP por ruta (acceso completo a esa ruta para siempre: lecciones, videos, quizzes, profesor en vivo). Pago seguro vía Mercado Pago.
+- Precios: pago único de $9.990 CLP por ruta (tuya para siempre) o suscripción Aulia Pro $24.990 CLP/mes (2 rutas nuevas al mes + clases en vivo extra + catálogo ilimitado). Pago seguro vía Flow.
+- GARANTÍA: 7 días — si no le sirve, escribe a hola@aulia.ai y se devuelve el 100% (deriva ahí los reembolsos, con tono cálido y sin fricción).
 - Profesor IA: cada ruta tiene su profesor con nombre propio. Hay una clase de inducción al empezar (te muestra tu ruta en una pizarra) y la clase completa se desbloquea al 40% de avance. Habla por voz, recuerda tu progreso, deja tareas (llegan por correo y aparecen en tu ruta) y puede agregarte módulos nuevos si lo necesitas. Cupo: 30 min de clase por semana.
 - Quizzes: aprobar con 60%+ completa la lección y suma XP. Hay racha diaria y comunidad con ranking.
 - Idiomas: el contenido puede ser en español, inglés o portugués. Para rutas de idiomas (chino, inglés...), el profesor pronuncia ejemplos en ese idioma.

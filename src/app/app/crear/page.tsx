@@ -16,6 +16,7 @@ export default async function CreatePathPage({
     level?: string;
     from?: string;
     error?: string;
+    pro?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -56,6 +57,12 @@ export default async function CreatePathPage({
         </p>
       </div>
 
+      {sp.pro === "bienvenida" && (
+        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-center text-sm font-medium text-primary">
+          🎉 ¡Bienvenido/a a Aulia Pro! Crea tu primera ruta del mes — está
+          incluida en tu plan.
+        </p>
+      )}
       {sp.error === "validacion" && (
         <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
           Revisa el tema y la meta: necesitamos un poco más de detalle.

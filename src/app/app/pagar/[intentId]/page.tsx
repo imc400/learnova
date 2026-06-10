@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   Sparkles,
   CheckCircle2,
@@ -55,17 +55,21 @@ export default async function PagarPage({
     redirect("/app/crear");
   }
 
-  // Preview perezoso: si el intent nació sin temario (deploy antiguo o fallo
-  // puntual de Haiku), se genera AQUÍ y se persiste — el paywall jamás sale
-  // genérico dos veces.
+  // Preview perezoso: si el intent nació sin temario, se genera AQUÍ con
+  // timeout (el SSR jamás se cuelga por Haiku) y se persiste con escritura
+  // CONDICIONAL (where preview is null) — cargas concurrentes no se pisan
+  // y el costo queda acotado (solo el dueño autenticado llega aquí).
   let preview = intent.preview;
   if (!preview?.modules?.length) {
-    const fresh = await generateRoutePreview({
-      topic: intent.topic,
-      level: intent.level,
-      goal: intent.goal,
-      language: intent.language,
-    });
+    const fresh = await Promise.race([
+      generateRoutePreview({
+        topic: intent.topic,
+        level: intent.level,
+        goal: intent.goal,
+        language: intent.language,
+      }),
+      new Promise<null>((r) => setTimeout(() => r(null), 4500)),
+    ]);
     if (fresh) {
       preview = {
         modules: fresh.modules,
@@ -75,7 +79,7 @@ export default async function PagarPage({
       await db
         .update(routeIntents)
         .set({ preview, updatedAt: new Date() })
-        .where(eq(routeIntents.id, intent.id));
+        .where(and(eq(routeIntents.id, intent.id), sql`${routeIntents.preview} is null`));
     }
   }
 
@@ -224,7 +228,8 @@ export default async function PagarPage({
       </div>
 
       <p className="mt-4 text-center text-sm font-medium">
-        🛡️ Garantía simple: si en 7 días no es para ti, te devolvemos el 100%.
+        🛡️ Garantía simple: si en 7 días no es para ti, escríbenos a
+        hola@aulia.ai y te devolvemos el 100%.
       </p>
       <p className="mt-2 text-center text-xs text-muted-foreground">
         Pago seguro vía {providerLabel()}. Tu ruta se empieza a generar apenas

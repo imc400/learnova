@@ -48,7 +48,12 @@ export default async function PathPage({
   searchParams,
 }: {
   params: Promise<{ pathId: string }>;
-  searchParams: Promise<{ clase?: string; clase_error?: string; induccion?: string }>;
+  searchParams: Promise<{
+    clase?: string;
+    clase_error?: string;
+    induccion?: string;
+    pro?: string;
+  }>;
 }) {
   const { pathId } = await params;
   const sp = await searchParams;
@@ -156,6 +161,18 @@ export default async function PathPage({
           ) : null}
         </div>
       </div>
+
+      {/* Bienvenida Pro: se suscribió desde el paywall y su ruta ya existe. */}
+      {sp.pro === "bienvenida" && (
+        <div className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-4">
+          <p className="font-display font-bold">🎉 ¡Bienvenido/a a Aulia Pro!</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Tu suscripción está activa y esta ruta ya se está generando — quedó
+            incluida en tu plan. Tienes rutas nuevas cada mes y clases extra
+            con tus profesores.
+          </p>
+        </div>
+      )}
 
       {/* Post-inducción: la conversación fue única — ahora a la ruta. */}
       {sp.induccion === "finalizada" && (
