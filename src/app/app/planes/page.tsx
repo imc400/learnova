@@ -61,6 +61,13 @@ export default async function PlanesPage({
           Algo falló al iniciar la suscripción. Intenta de nuevo en unos segundos.
         </p>
       )}
+      {sp.error === "email" && (
+        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
+          Tu correo no parece recibir mensajes (¿quedó con un error de tipeo?).
+          El procesador de pagos lo verifica para enviarte tus comprobantes —
+          escríbenos a hola@aulia.ai y lo corregimos al tiro.
+        </p>
+      )}
       {sp.error === "cobro" && (
         <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
           Tu tarjeta quedó registrada pero el primer cobro fue rechazado (¿fondos

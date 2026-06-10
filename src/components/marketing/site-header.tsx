@@ -23,7 +23,7 @@ export function SiteHeader() {
             <Link href="/login">Entrar</Link>
           </Button>
           <Button asChild size="sm">
-            <Link href="/signup">Crear mi ruta</Link>
+            <Link href="/empieza/ruta">Crear mi ruta</Link>
           </Button>
         </div>
       </div>

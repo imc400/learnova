@@ -59,6 +59,11 @@ export async function subscribeProAction() {
         .where(eq(profiles.id, user.id));
     } catch (e) {
       console.error("[pro] customer/create falló:", e);
+      // Flow VERIFICA que el buzón exista de verdad: correo inventado o con
+      // typo → mensaje accionable, no error genérico.
+      if ((e as Error).message?.includes("email is not valid")) {
+        redirect("/app/planes?error=email");
+      }
       redirect("/app/planes?error=pago");
     }
   }

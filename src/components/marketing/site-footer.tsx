@@ -25,7 +25,7 @@ export function SiteFooter() {
           <h4 className="text-sm font-semibold">Cuenta</h4>
           <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
             <li><Link href="/login" className="hover:text-foreground">Entrar</Link></li>
-            <li><Link href="/signup" className="hover:text-foreground">Crear cuenta</Link></li>
+            <li><Link href="/empieza/ruta" className="hover:text-foreground">Crear mi ruta</Link></li>
           </ul>
         </div>
       </div>
