@@ -54,12 +54,29 @@ async function emitMilestoneEmails(
         .innerJoin(modules, eq(modules.id, lessons.moduleId))
         .where(eq(modules.pathId, ctx.pathId))
         .orderBy(ascOrder(modules.orderIndex), ascOrder(lessons.orderIndex));
+
+      // "Siguiente paso": se genera AQUÍ (antes del outbox, que se encola una
+      // sola vez) para que la card de la ruta y el correo cuenten lo mismo.
+      const { getOrCreateNextPathSuggestion, nextPathUrl } = await import(
+        "@/lib/next-path"
+      );
+      const suggestion = await getOrCreateNextPathSuggestion({
+        userId,
+        sourcePathId: ctx.pathId,
+      });
+
       await enqueueProgressEmail(userId, "path_completed", ctx.pathId, {
         pathId: ctx.pathId,
         pathTitle: ctx.pathTitle,
         lessonTitles: titles.map((t) => t.title).slice(0, 8),
         progressPct: 100,
         language: ctx.language,
+        nextStep: suggestion
+          ? {
+              topic: suggestion.topic,
+              url: nextPathUrl(suggestion, ctx.pathId),
+            }
+          : undefined,
       });
     }
   } catch (e) {

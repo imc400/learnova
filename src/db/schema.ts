@@ -204,6 +204,8 @@ export const learningPaths = pgTable(
     skeletonCacheKey: text("skeleton_cache_key"), // de qué esqueleto derivó
     estimatedHours: real("estimated_hours"),
     isTemplate: boolean("is_template").default(false).notNull(),
+    // Métrica norte del "Siguiente paso": de qué ruta completada nació esta.
+    sourcePathId: uuid("source_path_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -538,6 +540,68 @@ export const emailLog = pgTable(
   (t) => ({
     userSentIdx: index("email_log_user_sent_idx").on(t.userId, t.sentAt),
     providerIdx: index("email_log_provider_idx").on(t.providerMessageId),
+  }),
+);
+
+// ---------- Ratings de módulos (feedback loop de calidad) ----------
+// Binario (up/down): Netflix midió +200% de volumen vs estrellas, y el flag de
+// regeneración del canónico necesita volumen rápido. Único por user+module.
+export const moduleRatings = pgTable(
+  "module_ratings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    moduleId: uuid("module_id")
+      .references(() => modules.id, { onDelete: "cascade" })
+      .notNull(),
+    pathId: uuid("path_id")
+      .references(() => learningPaths.id, { onDelete: "cascade" })
+      .notNull(),
+    rating: text("rating").notNull(), // 'up' | 'down'
+    reason: text("reason"), // chip opcional en thumbs-down (video|texto|quiz|nivel)
+    comment: text("comment"), // texto libre opcional
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqUserModule: uniqueIndex("module_ratings_user_module_idx").on(
+      t.userId,
+      t.moduleId,
+    ),
+    moduleIdx: index("module_ratings_module_idx").on(t.moduleId),
+  }),
+);
+
+// ---------- Sugerencia de "Siguiente paso" (post-ruta completada) ----------
+// Una por ruta completada (la genera el hito y queda congelada, consistente
+// con el correo). Cacheable cross-usuario por skeletonCacheKey.
+export const nextPathSuggestions = pgTable(
+  "next_path_suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    sourcePathId: uuid("source_path_id")
+      .references(() => learningPaths.id, { onDelete: "cascade" })
+      .notNull(),
+    skeletonCacheKey: text("skeleton_cache_key"),
+    topic: text("topic").notNull(),
+    goal: text("goal").notNull(),
+    level: pathLevel("level").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().default([]).notNull(),
+    source: text("source").default("haiku").notNull(), // haiku|deterministic|cache
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqSourcePath: uniqueIndex("next_path_suggestions_source_idx").on(
+      t.sourcePathId,
+    ),
+    skeletonIdx: index("next_path_suggestions_skeleton_idx").on(
+      t.skeletonCacheKey,
+    ),
   }),
 );
 

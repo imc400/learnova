@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { count, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { learningPaths } from "@/db/schema";
+import { learningPaths, xpEvents } from "@/db/schema";
 import { intakeSchema } from "@/lib/ai/schemas";
 import { enqueuePathGeneration } from "@/lib/generation/run";
 import { getEntitlement, FREE_PATH_LIMIT } from "@/lib/subscription";
@@ -18,17 +18,39 @@ export async function createPathAction(formData: FormData) {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Techo de costos: cada ruta cuesta dinero real (Opus + Sonnet + Gemini +
-  // cuota YouTube). El tier free tiene límite; Pro es ilimitado.
+  // Techo de costos con "cupo ganado": el límite free crece con cada ruta
+  // COMPLETADA (ledger path_completed, no gameable por URL). Quien termina,
+  // desbloquea la siguiente — solo los que aprenden generan costo nuevo.
   const { isPro } = await getEntitlement(user.id);
   if (!isPro) {
-    const [row] = await db
-      .select({ n: count() })
-      .from(learningPaths)
-      .where(eq(learningPaths.userId, user.id));
-    if (Number(row?.n ?? 0) >= FREE_PATH_LIMIT) {
+    const [[created], [completed]] = await Promise.all([
+      db
+        .select({ n: count() })
+        .from(learningPaths)
+        .where(eq(learningPaths.userId, user.id)),
+      db
+        .select({ n: count() })
+        .from(xpEvents)
+        .where(
+          and(eq(xpEvents.userId, user.id), eq(xpEvents.source, "path_completed")),
+        ),
+    ]);
+    const allowed = FREE_PATH_LIMIT + Number(completed?.n ?? 0);
+    if (Number(created?.n ?? 0) >= allowed) {
       redirect("/app/planes?motivo=limite-rutas");
     }
+  }
+
+  // Métrica norte del "Siguiente paso": de qué ruta completada nació esta.
+  const fromRaw = String(formData.get("from") ?? "");
+  let sourcePathId: string | null = null;
+  if (/^[0-9a-f-]{36}$/i.test(fromRaw)) {
+    const [owned] = await db
+      .select({ id: learningPaths.id })
+      .from(learningPaths)
+      .where(and(eq(learningPaths.id, fromRaw), eq(learningPaths.userId, user.id)))
+      .limit(1);
+    if (owned) sourcePathId = owned.id;
   }
 
   const weekly = formData.get("weeklyHours");
@@ -62,6 +84,7 @@ export async function createPathAction(formData: FormData) {
       language: intake.language,
       status: "generating",
       intake,
+      sourcePathId,
     })
     .returning();
 

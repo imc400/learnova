@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, X, Loader2, Flame, Trophy, Zap, Award } from "lucide-react";
+import { Check, X, Loader2, Flame, Trophy, Zap, Award, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ModuleRating } from "@/components/app/module-rating";
 import {
   gradeQuizAction,
   type GradeResult,
@@ -117,14 +119,26 @@ export function Quiz({
           )}
 
           {g?.moduleCompleted && (
-            <p className="mt-2 text-sm">
-              🏁 ¡Completaste el módulo <strong>{g.moduleCompleted.title}</strong>!
-            </p>
+            <div className="mt-2">
+              <p className="text-sm">
+                🏁 ¡Completaste el módulo <strong>{g.moduleCompleted.title}</strong>!
+              </p>
+              {/* Pico emocional = el mejor momento para pedir feedback (peak-end). */}
+              <ModuleRating moduleId={g.moduleCompleted.id} />
+            </div>
           )}
           {g?.pathCompleted && (
-            <p className="mt-2 text-sm">
-              🏆 ¡Terminaste la ruta <strong>{g.pathCompleted.title}</strong>! Enorme.
-            </p>
+            <div className="mt-2">
+              <p className="text-sm">
+                🏆 ¡Terminaste la ruta <strong>{g.pathCompleted.title}</strong>! Enorme.
+              </p>
+              <Link
+                href={`/app/rutas/${g.pathCompleted.id}`}
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
+              >
+                Ver mi siguiente paso <ArrowRight className="size-3.5" />
+              </Link>
+            </div>
           )}
         </div>
       )}

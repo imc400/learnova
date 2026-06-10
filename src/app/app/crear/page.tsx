@@ -7,7 +7,21 @@ import { SubmitButton } from "@/components/app/submit-button";
 
 export const metadata = { title: "Crear ruta" };
 
-export default async function CreatePathPage() {
+const LEVELS = new Set(["principiante", "intermedio", "avanzado"]);
+const UUID_RE = /^[0-9a-f-]{36}$/i;
+
+export default async function CreatePathPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    topic?: string;
+    goal?: string;
+    level?: string;
+    from?: string;
+    error?: string;
+  }>;
+}) {
+  const sp = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -16,6 +30,13 @@ export default async function CreatePathPage() {
   const defaultLang = (
     (user?.user_metadata?.preferred_language as string | undefined) ?? "es"
   ).slice(0, 2);
+
+  // Prefill desde "Siguiente paso" (sanitizado): el CTA precarga la sugerencia.
+  const prefillTopic = sp.topic?.slice(0, 120) ?? "";
+  const prefillGoal = sp.goal?.slice(0, 400) ?? "";
+  const prefillLevel = sp.level && LEVELS.has(sp.level) ? sp.level : "principiante";
+  const fromPathId = sp.from && UUID_RE.test(sp.from) ? sp.from : "";
+
   return (
     <div className="mx-auto max-w-xl">
       <div className="text-center">
@@ -23,19 +44,29 @@ export default async function CreatePathPage() {
           <Sparkles className="size-6" />
         </span>
         <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight">
-          ¿Qué quieres aprender?
+          {prefillTopic ? "Tu siguiente ruta" : "¿Qué quieres aprender?"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Responde estas preguntas y armamos tu ruta a medida en minutos.
+          {prefillTopic
+            ? "Ajusta lo que quieras — la armamos sobre lo que ya dominas."
+            : "Responde estas preguntas y armamos tu ruta a medida en minutos."}
         </p>
       </div>
 
+      {sp.error === "validacion" && (
+        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
+          Revisa el tema y la meta: necesitamos un poco más de detalle.
+        </p>
+      )}
+
       <form action={createPathAction} className="mt-8 flex flex-col gap-5">
+        {fromPathId && <input type="hidden" name="from" value={fromPathId} />}
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="topic">Tema</Label>
           <Input
             id="topic"
             name="topic"
+            defaultValue={prefillTopic}
             placeholder="Ej: Cocina, Python, Marketing digital, Guitarra…"
             required
           />
@@ -48,6 +79,7 @@ export default async function CreatePathPage() {
             name="goal"
             rows={3}
             required
+            defaultValue={prefillGoal}
             placeholder="Ej: Quiero poder cocinar platos completos para mi familia los fines de semana."
             className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-sm text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
           />
@@ -73,7 +105,7 @@ export default async function CreatePathPage() {
             <select
               id="level"
               name="level"
-              defaultValue="principiante"
+              defaultValue={prefillLevel}
               className="h-11 rounded-md border border-input bg-card px-3 text-sm text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
             >
               <option value="principiante">Principiante</option>

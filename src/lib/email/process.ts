@@ -224,6 +224,13 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
         bullets: content.bullets,
         bulletsTitle: row.type === "module_ready" ? "Lo que viene" : "Esto aprendiste",
         cta: { label: content.cta, url: ctaUrl },
+        secondaryCta:
+          row.type === "path_completed" && payload.nextStep
+            ? {
+                label: `Tu siguiente paso: ${payload.nextStep.topic}`,
+                url: `${site}${payload.nextStep.url}`,
+              }
+            : undefined,
         stats,
         unsubscribeUrl,
       }),

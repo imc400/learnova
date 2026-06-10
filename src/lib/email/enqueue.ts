@@ -11,6 +11,8 @@ export type ProgressEmailPayload = {
   quizzesPassed?: number;
   progressPct?: number;
   language?: string;
+  /** CTA secundaria del correo path_completed: la siguiente ruta sugerida. */
+  nextStep?: { topic: string; url: string };
 };
 
 /*

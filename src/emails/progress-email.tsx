@@ -37,6 +37,7 @@ export interface ProgressEmailProps {
   bullets: string[];
   bulletsTitle?: string;
   cta: { label: string; url: string };
+  secondaryCta?: { label: string; url: string };
   stats?: { label: string; value: string }[];
   unsubscribeUrl: string;
 }
@@ -49,6 +50,7 @@ export function ProgressEmail({
   bullets,
   bulletsTitle = "Esto aprendiste",
   cta,
+  secondaryCta,
   stats,
   unsubscribeUrl,
 }: ProgressEmailProps) {
@@ -108,6 +110,13 @@ export function ProgressEmail({
             >
               {cta.label}
             </Button>
+            {secondaryCta && (
+              <Text style={{ margin: "14px 0 0", fontSize: 14 }}>
+                <Link href={secondaryCta.url} style={{ color: palette.green, fontWeight: 700 }}>
+                  {secondaryCta.label} →
+                </Link>
+              </Text>
+            )}
           </Section>
 
           <Hr style={{ borderColor: palette.border, margin: "24px 0 12px" }} />

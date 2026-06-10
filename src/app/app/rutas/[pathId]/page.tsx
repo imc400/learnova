@@ -9,11 +9,16 @@ import {
   Loader2,
   Trophy,
 } from "lucide-react";
+import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { moduleRatings } from "@/db/schema";
 import { getPathTree } from "@/server/queries/paths";
 import { GeneratingState } from "@/components/app/generating-state";
 import { RouteProgressLive } from "@/components/app/route-progress-live";
 import { LearningProgress } from "@/components/app/learning-progress";
+import { NextStepCard } from "@/components/app/next-step-card";
+import { ModuleRating } from "@/components/app/module-rating";
 import { Badge } from "@/components/ui/badge";
 
 export default async function PathPage({
@@ -30,6 +35,13 @@ export default async function PathPage({
 
   const path = await getPathTree(pathId, user.id);
   if (!path) notFound();
+
+  // Ratings existentes del usuario en esta ruta (badge junto a ✓ Completado).
+  const myRatings = await db
+    .select({ moduleId: moduleRatings.moduleId, rating: moduleRatings.rating })
+    .from(moduleRatings)
+    .where(and(eq(moduleRatings.userId, user.id), eq(moduleRatings.pathId, pathId)));
+  const ratingByModule = new Map(myRatings.map((r) => [r.moduleId, r.rating]));
 
   if (path.status === "generating") {
     return (
@@ -118,6 +130,15 @@ export default async function PathPage({
         </div>
       )}
 
+      {/* Siguiente paso: SOLO al 100% (el pico motivacional, no antes) */}
+      {path.lessonCount > 0 && path.completedLessons === path.lessonCount && (
+        <NextStepCard
+          pathId={path.id}
+          userId={user.id}
+          moduleTitles={path.modules.map((m) => m.title)}
+        />
+      )}
+
       <div className="mt-8 space-y-6">
         {path.modules.map((m, mi) => {
           const remaining = m.lessons.length - m.completedCount;
@@ -128,16 +149,27 @@ export default async function PathPage({
                   Módulo {mi + 1}
                 </span>
                 {m.lessons.length > 0 && (
-                  <span
-                    className={`text-xs tabular-nums ${
-                      remaining === 0
-                        ? "font-semibold text-primary"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    {remaining === 0
-                      ? "✓ Completado"
-                      : `${m.completedCount}/${m.lessons.length}`}
+                  <span className="flex items-center gap-3">
+                    {remaining === 0 && (
+                      <ModuleRating
+                        moduleId={m.id}
+                        variant="badge"
+                        initialRating={
+                          (ratingByModule.get(m.id) as "up" | "down" | undefined) ?? null
+                        }
+                      />
+                    )}
+                    <span
+                      className={`text-xs tabular-nums ${
+                        remaining === 0
+                          ? "font-semibold text-primary"
+                          : "text-muted-foreground"
+                      }`}
+                    >
+                      {remaining === 0
+                        ? "✓ Completado"
+                        : `${m.completedCount}/${m.lessons.length}`}
+                    </span>
                   </span>
                 )}
               </div>
