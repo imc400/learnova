@@ -125,6 +125,8 @@ export const profiles = pgTable("profiles", {
   phone: text("phone"),
   // Acceso al dashboard /app/admin (complementado por env.ADMIN_EMAILS).
   isAdmin: boolean("is_admin").default(false).notNull(),
+  // Customer de Flow (cobro recurrente de la suscripción Pro).
+  flowCustomerId: text("flow_customer_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -822,6 +824,8 @@ export const subscriptions = pgTable("subscriptions", {
   provider: paymentProvider("provider"),
   providerSubscriptionId: text("provider_subscription_id"),
   currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+  // Cancelación al final del período: el acceso se conserva hasta period_end.
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

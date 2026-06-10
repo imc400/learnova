@@ -64,6 +64,10 @@ const serverSchema = z.object({
   PAYWALL_ENABLED: z.string().default("false"),
   // Precio por ruta en CLP (override sin deploy).
   PRICE_ROUTE_CLP: z.coerce.number().int().positive().default(9990),
+  // Suscripción Pro (estudio de costos 2026-06: peor caso 50% de margen).
+  PRICE_PRO_CLP: z.coerce.number().int().positive().default(24990),
+  PRO_ROUTES_PER_MONTH: z.coerce.number().int().positive().default(2),
+  FLOW_PLAN_ID: z.string().default("aulia_pro"),
   // Acceso al dashboard admin además de profiles.is_admin (coma-separado).
   ADMIN_EMAILS: z.string().default(""),
 });

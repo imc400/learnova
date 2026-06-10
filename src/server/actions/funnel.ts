@@ -14,7 +14,11 @@ import {
   type WizardQuestion,
 } from "@/lib/ai/wizard";
 import { createPathRecord } from "@/lib/paths/create";
-import { getEntitlement, FREE_PATH_LIMIT } from "@/lib/subscription";
+import {
+  getEntitlement,
+  proRoutesLeftThisMonth,
+  FREE_PATH_LIMIT,
+} from "@/lib/subscription";
 import { env } from "@/lib/env";
 
 /*
@@ -157,7 +161,8 @@ export async function createAccountAndIntentAction(input: {
     .where(eq(profiles.id, user.id))
     .limit(1);
   const { isPro } = await getEntitlement(user.id);
-  const paywallOn = env.PAYWALL_ENABLED === "true" && !isPro && !me?.isAdmin;
+  const proHasQuota = isPro && (await proRoutesLeftThisMonth(user.id)) > 0;
+  const paywallOn = env.PAYWALL_ENABLED === "true" && !proHasQuota && !me?.isAdmin;
 
   const preview = await generateRoutePreview({
     topic: intake.topic,

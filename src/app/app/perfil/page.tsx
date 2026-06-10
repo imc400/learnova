@@ -13,6 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { profiles, subscriptions, pathPurchases, learningPaths } from "@/db/schema";
 import { updatePersonalDataAction } from "@/server/actions/profile";
+import { cancelProAction } from "@/server/actions/subscription";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,6 +83,22 @@ export default async function PerfilPage({
           Revisa tu WhatsApp: 8 a 15 dígitos (ej: +56 9 1234 5678).
         </p>
       )}
+      {sp.ok === "pro" && (
+        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary">
+          🎉 ¡Bienvenido/a a Aulia Pro! Tu suscripción está activa.
+        </p>
+      )}
+      {sp.ok === "cancelada" && (
+        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-sm font-medium">
+          Tu suscripción se canceló — conservas Pro hasta el fin del período
+          pagado. Te esperamos de vuelta. ✺
+        </p>
+      )}
+      {sp.error === "cancelacion" && (
+        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive">
+          No pudimos cancelar. Escríbenos a hola@aulia.ai y lo resolvemos al tiro.
+        </p>
+      )}
 
       {/* Datos personales */}
       <section className="mt-6 rounded-xl border border-border bg-card p-5">
@@ -132,10 +149,23 @@ export default async function PerfilPage({
                   : ""}
                 {sub?.provider ? ` · vía ${sub.provider === "mercadopago" ? "Mercado Pago" : sub.provider === "flow" ? "Flow" : sub.provider}` : ""}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Para cancelar o cambiar tu plan, escríbenos a hola@aulia.ai —
-                lo gestionamos al instante.
-              </p>
+              {sub?.cancelAtPeriodEnd ? (
+                <p className="mt-1 text-xs font-medium text-accent-foreground">
+                  Cancelación programada: conservas Pro hasta el{" "}
+                  {fmtDate(sub.currentPeriodEnd)}.
+                </p>
+              ) : (
+                <form action={cancelProAction} className="mt-3">
+                  <SubmitButton
+                    variant="outline"
+                    size="sm"
+                    pendingText="Cancelando…"
+                    className="text-muted-foreground"
+                  >
+                    Cancelar suscripción
+                  </SubmitButton>
+                </form>
+              )}
             </div>
           </div>
         ) : (

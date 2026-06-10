@@ -15,7 +15,11 @@ import {
   type WizardQuestion,
 } from "@/lib/ai/wizard";
 import { enqueuePathGeneration } from "@/lib/generation/run";
-import { getEntitlement, FREE_PATH_LIMIT } from "@/lib/subscription";
+import {
+  getEntitlement,
+  proRoutesLeftThisMonth,
+  FREE_PATH_LIMIT,
+} from "@/lib/subscription";
 import { slugify } from "@/lib/utils";
 
 /**
@@ -176,7 +180,10 @@ export async function createRouteIntentAction(input: {
     .where(eq(profiles.id, user.id))
     .limit(1);
   const { isPro } = await getEntitlement(user.id);
-  const paywallOn = env.PAYWALL_ENABLED === "true" && !isPro && !me?.isAdmin;
+  // Pro incluye N rutas nuevas/mes; agotado el cupo, la extra paga precio
+  // normal (los heavy users se monetizan, no se subsidian).
+  const proHasQuota = isPro && (await proRoutesLeftThisMonth(user.id)) > 0;
+  const paywallOn = env.PAYWALL_ENABLED === "true" && !proHasQuota && !me?.isAdmin;
 
   const [intent] = await db
     .insert(routeIntents)

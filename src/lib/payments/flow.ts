@@ -94,11 +94,127 @@ export async function getPaymentStatus(token: string): Promise<FlowStatus> {
   return (await res.json()) as FlowStatus;
 }
 
-/*
-  SUSCRIPCIÓN RECURRENTE ($15/mes): Flow requiere crear primero un "plan" y un
-  "customer" y luego una "subscription" (endpoints /plans, /customer, /subscription).
-  Para v1 la suscripción Pro puede modelarse como pago recurrente con el plan de
-  Flow; implementar `createSubscription()` siguiendo
-  https://www.flow.cl/docs/api.html#tag/subscription una vez creado el plan en el
-  panel de Flow. El webhook de abajo ya distingue commerceOrder "sub_…".
-*/
+/* ============================================================
+   SUSCRIPCIONES (plan → customer → tarjeta → subscription)
+   Flujo: createCustomer una vez por usuario → registerCard (redirige a Flow
+   a guardar la tarjeta) → al volver, getRegisterStatus confirma → SOLO
+   entonces createSubscription (cargo automático mensual). Flow notifica cada
+   cobro a la urlCallback del PLAN con un POST {token} → verificar con
+   getPaymentStatus (firmado). Montos mínimos: 350 CLP.
+   ============================================================ */
+
+async function flowPost<T>(path: string, params: Record<string, string>): Promise<T> {
+  const { apiKey, secretKey } = creds();
+  const all = { ...params, apiKey };
+  const s = sign(all, secretKey);
+  const res = await fetch(`${env.FLOW_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: toForm(all, s),
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`[flow] ${path} ${res.status}: ${body.slice(0, 250)}`);
+  return JSON.parse(body) as T;
+}
+
+async function flowGet<T>(path: string, params: Record<string, string>): Promise<T> {
+  const { apiKey, secretKey } = creds();
+  const all = { ...params, apiKey };
+  const s = sign(all, secretKey);
+  const qs = new URLSearchParams({ ...all, s }).toString();
+  const res = await fetch(`${env.FLOW_BASE_URL}${path}?${qs}`);
+  const body = await res.text();
+  if (!res.ok) throw new Error(`[flow] ${path} ${res.status}: ${body.slice(0, 250)}`);
+  return JSON.parse(body) as T;
+}
+
+/** Crea el plan de suscripción (una vez, vía script). interval 3 = mensual. */
+export async function createPlan(args: {
+  planId: string;
+  name: string;
+  amountCLP: number;
+  urlCallback: string;
+}) {
+  return flowPost<{ planId: string; status: number }>("/plans/create", {
+    planId: args.planId,
+    name: args.name,
+    currency: "CLP",
+    amount: String(Math.round(args.amountCLP)),
+    interval: "3",
+    urlCallback: args.urlCallback,
+  });
+}
+
+/** Customer de Flow (1 por usuario; externalId = UUID de Supabase). */
+export async function createCustomer(args: {
+  name: string;
+  email: string;
+  externalId: string;
+}): Promise<{ customerId: string }> {
+  return flowPost<{ customerId: string }>("/customer/create", {
+    name: args.name,
+    email: args.email,
+    externalId: args.externalId,
+  });
+}
+
+/** Inicia el registro de tarjeta: devuelve URL de Flow a la que redirigir. */
+export async function registerCard(args: {
+  customerId: string;
+  urlReturn: string;
+}): Promise<{ redirectUrl: string }> {
+  const r = await flowPost<{ url: string; token: string }>("/customer/register", {
+    customerId: args.customerId,
+    url_return: args.urlReturn, // snake_case — así lo exige Flow
+  });
+  return { redirectUrl: `${r.url}?token=${r.token}` };
+}
+
+/** Confirma si la tarjeta quedó registrada (status "1" = sí). */
+export async function getRegisterStatus(token: string): Promise<{
+  status: string;
+  customerId: string;
+  creditCardType: string | null;
+  last4CardDigits: string | null;
+}> {
+  return flowGet("/customer/getRegisterStatus", { token });
+}
+
+export interface FlowSubscription {
+  subscriptionId: string;
+  planId: string;
+  customerId: string;
+  status: number; // 0 inactiva · 1 activa · 2 trial · 4 cancelada
+  morose: number; // 0 al día · 1 vencidos · 2 pendientes
+  period_start: string;
+  period_end: string;
+  next_invoice_date: string;
+  cancel_at_period_end: number;
+}
+
+/** Crea la suscripción (cobra YA si hay tarjeta registrada). */
+export async function createSubscription(args: {
+  planId: string;
+  customerId: string;
+}): Promise<FlowSubscription> {
+  return flowPost<FlowSubscription>("/subscription/create", {
+    planId: args.planId,
+    customerId: args.customerId,
+  });
+}
+
+/** Cancela: at_period_end=1 conserva acceso hasta el fin del período. */
+export async function cancelSubscription(
+  subscriptionId: string,
+  atPeriodEnd = true,
+): Promise<FlowSubscription> {
+  return flowPost<FlowSubscription>("/subscription/cancel", {
+    subscriptionId,
+    at_period_end: atPeriodEnd ? "1" : "0",
+  });
+}
+
+/** Estado actual de una suscripción (para webhook y cron de conciliación). */
+export async function getSubscription(subscriptionId: string): Promise<FlowSubscription> {
+  return flowGet<FlowSubscription>("/subscription/get", { subscriptionId });
+}
