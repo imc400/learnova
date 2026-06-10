@@ -20,6 +20,12 @@ import { env } from "@/lib/env";
 */
 
 export async function subscribeProAction() {
+  // Hasta que Flow active el contrato de cobro automático (PAT), Pro no se
+  // vende — guard server-side por si el form llega desde una página cacheada.
+  if (env.PRO_SUBSCRIPTION_ENABLED !== "true") {
+    redirect("/app/planes?error=disponible");
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

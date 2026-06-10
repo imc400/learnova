@@ -32,6 +32,9 @@ export default async function PlanesPage({
 
   const pro = env.PRICE_PRO_CLP;
   const ruta = env.PRICE_ROUTE_CLP;
+  // Pro requiere el contrato de cobro automático de Flow (PAT) — hasta
+  // activarlo, la card ancla el precio y el CTA es "muy pronto".
+  const proEnabled = env.PRO_SUBSCRIPTION_ENABLED === "true";
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -115,7 +118,7 @@ export default async function PlanesPage({
         {/* Pro */}
         <div className="relative rounded-2xl border-2 border-primary bg-card p-6 shadow-lift">
           <span className="absolute -top-3 left-6 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-            ⭐ Para los que van en serio
+            {proEnabled ? "⭐ Para los que van en serio" : "✺ Muy pronto"}
           </span>
           <h2 className="font-display text-lg font-semibold">Aulia Pro</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -139,15 +142,24 @@ export default async function PlanesPage({
               </li>
             ))}
           </ul>
-          <form action={subscribeProAction} className="mt-6">
-            <SubmitButton size="lg" className="w-full" pendingText="Conectando con Flow…">
-              <Sparkles className="size-4" /> Hacerme Pro
-            </SubmitButton>
-          </form>
-          <p className="mt-3 text-center text-xs text-muted-foreground">
-            Pago mensual seguro vía Flow. Cancelas cuando quieras y conservas
-            el acceso hasta el fin del período.
-          </p>
+          {proEnabled ? (
+            <>
+              <form action={subscribeProAction} className="mt-6">
+                <SubmitButton size="lg" className="w-full" pendingText="Conectando con Flow…">
+                  <Sparkles className="size-4" /> Hacerme Pro
+                </SubmitButton>
+              </form>
+              <p className="mt-3 text-center text-xs text-muted-foreground">
+                Pago mensual seguro vía Flow. Cancelas cuando quieras y conservas
+                el acceso hasta el fin del período.
+              </p>
+            </>
+          ) : (
+            <p className="mt-6 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">
+              Estamos abriendo los cupos de Pro. Mientras tanto, cada ruta que
+              compres es tuya para siempre — te avisamos apenas esté listo. ✺
+            </p>
+          )}
         </div>
       </div>
 

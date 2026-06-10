@@ -85,6 +85,9 @@ export default async function PagarPage({
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
   const pro = env.PRICE_PRO_CLP;
+  // Pro requiere el contrato de cobro automático de Flow (PAT). Hasta que se
+  // active, la card queda como ancla de precio y el pago único es el CTA.
+  const proEnabled = env.PRO_SUBSCRIPTION_ENABLED === "true";
   const firstName =
     (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ?? null;
 
@@ -188,16 +191,21 @@ export default async function PagarPage({
             ))}
           </ul>
           <form action={startIntentCheckoutAction.bind(null, intent.id)} className="mt-4">
-            <SubmitButton size="lg" className="w-full" variant="outline" pendingText="Conectando…">
+            <SubmitButton
+              size="lg"
+              className="w-full"
+              variant={proEnabled ? "outline" : "primary"}
+              pendingText="Conectando…"
+            >
               <ShieldCheck className="size-4" /> Desbloquear mi ruta
             </SubmitButton>
           </form>
         </div>
 
-        {/* Pro — Más elegido */}
+        {/* Pro — Más elegido (o ancla "muy pronto" mientras Flow activa el PAT) */}
         <div className="relative flex flex-col rounded-2xl border-2 border-primary bg-card p-5 shadow-lift">
           <span className="absolute -top-3 left-4 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-            🔥 Más elegido
+            {proEnabled ? "🔥 Más elegido" : "✺ Muy pronto"}
           </span>
           <p className="font-display font-semibold">Aulia Pro</p>
           <p className="mt-3 font-display text-3xl font-bold text-primary">
@@ -219,11 +227,18 @@ export default async function PagarPage({
               </li>
             ))}
           </ul>
-          <form action={subscribeProAction} className="mt-4">
-            <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
-              <Sparkles className="size-4" /> Empezar con Pro
-            </SubmitButton>
-          </form>
+          {proEnabled ? (
+            <form action={subscribeProAction} className="mt-4">
+              <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
+                <Sparkles className="size-4" /> Empezar con Pro
+              </SubmitButton>
+            </form>
+          ) : (
+            <p className="mt-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">
+              Estamos abriendo los cupos de Pro. Desbloquea tu ruta hoy y serás
+              de los primeros en enterarte.
+            </p>
+          )}
         </div>
       </div>
 
