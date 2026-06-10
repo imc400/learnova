@@ -197,6 +197,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
       let queryByIndex = new Map<number, string>();
       try {
         const q = await generateVideoQueries({
+          routeTitle: skeleton.title,
           moduleTitle: m.title,
           moduleObjective: m.objective,
           lessons: lessons.map(({ ls }, i) => ({

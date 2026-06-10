@@ -67,6 +67,7 @@ function digestPrompt(lessonSummary: string, language: string): string {
     "- quizAnchors: 6-10 hechos CITABLES que el video realmente afirma, distribuidos por TODO el video, cada uno con su timestamp y una idea de pregunta.",
     "- terminology: términos exactos que usa el creador (para que la lección hable su mismo idioma).",
     `- coverage: número 0-1 de cuánto cubre el video este objetivo de lección: "${lessonSummary}".`,
+    "  IMPORTANTE: si el video enseña el tema con un MEDIO/HERRAMIENTA distinta a la del objetivo (p.ej. cámara DSLR cuando el objetivo dice celular, u otra app/software), el coverage MÁXIMO es 0.4 — el estudiante necesita ver SU herramienta.",
     "- coverageNotes: qué del objetivo NO cubre el video (para que la lección lo complemente).",
     "- audioLanguage: idioma del AUDIO hablado (código ISO 639-1, ej: es, en).",
     "- timestampSeconds SIEMPRE dentro de la duración real del video.",

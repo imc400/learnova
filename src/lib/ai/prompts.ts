@@ -40,7 +40,8 @@ GROUNDING (anclaje verificable):
 - Si se entregaron ANCLAS DEL VIDEO: al menos 2 preguntas con source 'video' o 'both', usando EXACTAMENTE el timestampSeconds del ancla correspondiente; la explanation puede citar el minuto.
 - Si NO hay anclas: TODAS las preguntas con source 'lesson' y timestampSeconds null. JAMÁS inventes timestamps.`;
 
-export const VIDEO_QUERIES_INSTRUCTIONS = `Eres experto en búsqueda de YouTube. Para cada lección (título + resumen) genera UNA query corta (3-6 palabras) en el idioma del estudiante, sin signos de puntuación, optimizada para encontrar un buen tutorial específico de ese tema. Evita queries genéricas que devolverían el mismo video para lecciones distintas.`;
+export const VIDEO_QUERIES_INSTRUCTIONS = `Eres experto en búsqueda de YouTube. Para cada lección (título + resumen) genera UNA query corta (3-6 palabras) en el idioma del estudiante, sin signos de puntuación, optimizada para encontrar un buen tutorial específico de ese tema.
+REGLA CLAVE: incluye SIEMPRE el calificador que define el MEDIO/HERRAMIENTA de la ruta (p.ej. si la ruta es "fotografía con celular", toda query lleva "celular" o "móvil" — nunca una query que devuelva tutoriales de cámaras DSLR; si la ruta es "Excel", lleva "excel"). Evita queries genéricas que devolverían el mismo video para lecciones distintas.`;
 
 export const LESSON_VIDEO_ANCHOR_INSTRUCTIONS = `ANCLAJE AL VIDEO (se entregó un digest del video de apoyo):
 - Usa la TERMINOLOGÍA del creador del video cuando difiera de la tuya (el estudiante verá el video; deben hablar el mismo idioma).

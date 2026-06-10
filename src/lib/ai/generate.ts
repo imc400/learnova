@@ -153,6 +153,7 @@ export async function generateLessonContent(args: {
 /** NIVEL 3 — Haiku deriva las queries de video de TODO un módulo en 1 llamada
  *  (desde los stubs del esqueleto: el video se elige ANTES de escribir la lección). */
 export async function generateVideoQueries(args: {
+  routeTitle: string;
   moduleTitle: string;
   moduleObjective: string;
   lessons: { index: number; title: string; summary: string }[];
@@ -168,6 +169,7 @@ export async function generateVideoQueries(args: {
       {
         role: "user",
         content: [
+          `RUTA (define el medio/herramienta de TODAS las queries): ${args.routeTitle}`,
           `Módulo: ${args.moduleTitle} — Objetivo: ${args.moduleObjective}`,
           `Idioma del estudiante: ${args.language}`,
           "Lecciones:",
