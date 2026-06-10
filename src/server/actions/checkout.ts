@@ -35,7 +35,9 @@ export async function startIntentCheckoutAction(intentId: string) {
   }
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
-  const returnUrl = `${env.NEXT_PUBLIC_SITE_URL}/app/pagar/${intent.id}/retorno`;
+  // Flow devuelve al navegador con POST cross-site (sin cookies) → SIEMPRE
+  // por el puente público /api/flow/retorno, que convierte a GET con sesión.
+  const returnUrl = `${env.NEXT_PUBLIC_SITE_URL}/api/flow/retorno?intent=${intent.id}`;
   let redirectUrl: string;
   try {
     if (activeProvider() === "mercadopago") {

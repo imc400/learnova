@@ -67,8 +67,8 @@ function Hero() {
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Button asChild size="lg">
-              <Link href="/signup">
-                Crear mi ruta gratis <ArrowRight className="size-4" />
+              <Link href="/empieza/ruta">
+                Crear mi ruta ahora <ArrowRight className="size-4" />
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
@@ -76,7 +76,7 @@ function Hero() {
             </Button>
           </div>
           <p className="mt-4 text-sm text-muted-foreground">
-            Gratis para empezar · Sin tarjeta · Tu primera ruta en minutos
+            Tu ruta diseñada en 2 minutos · Garantía de 7 días · Profesor IA en vivo
           </p>
         </div>
 
@@ -244,43 +244,33 @@ function Features() {
 }
 
 function Pricing() {
-  const { subscriptionMonthly, singlePath } = site.pricing;
   return (
     <section id="precios" className="py-20 lg:py-28">
       <div className="container-page">
         <SectionHeading
           eyebrow="Precios"
-          title="Empieza gratis. Mejora cuando quieras."
-          subtitle="Sin contratos. Cancela cuando quieras."
+          title="Simple: por ruta, o todo Aulia"
+          subtitle="Sin contratos. Cancela cuando quieras. Garantía de 7 días."
         />
-        <div className="mx-auto mt-12 grid max-w-5xl gap-6 lg:grid-cols-3">
+        <div className="mx-auto mt-12 grid max-w-3xl gap-6 lg:grid-cols-2">
           <PlanCard
-            name="Gratis"
-            price={formatPrice(0)}
-            period=""
-            description="Para probar cómo se siente tu ruta a medida."
-            features={["1 ruta de aprendizaje", "Lecciones y videos curados", "Tutor de IA incluido"]}
-            cta="Empezar gratis"
-            href="/signup"
-          />
-          <PlanCard
-            name="Pro"
-            price={formatPrice(subscriptionMonthly)}
-            period="/mes"
-            description="Aprende sin límites, con todo desbloqueado."
-            features={["Rutas ilimitadas", "Tutor en vivo ilimitado", "Quizzes en cada lección", "Progreso, niveles y rachas"]}
-            cta="Empezar Pro"
-            href="/signup"
-            highlighted
-          />
-          <PlanCard
-            name="Ruta única"
-            price={formatPrice(singlePath)}
+            name="Por ruta"
+            price={formatPrice(9990)}
             period="única vez"
-            description="¿Solo quieres una ruta? Llévatela sin suscripción."
-            features={["1 ruta completa a medida", "Acceso permanente", "Videos y notas incluidos"]}
-            cta="Comprar una ruta"
-            href="/signup"
+            description="Tu ruta a medida, tuya para siempre."
+            features={["Ruta completa para TU meta", "Videos curados + quizzes + XP", "Profesor IA: bienvenida + clases en vivo", "Tareas y avances a tu correo y WhatsApp"]}
+            cta="Crear mi ruta"
+            href="/empieza/ruta"
+          />
+          <PlanCard
+            name="Aulia Pro 🔥"
+            price={formatPrice(24990)}
+            period="/mes"
+            description="Tu profesor particular, todos los meses."
+            features={["2 rutas nuevas a tu medida cada mes", "Clases en vivo extra con tus profesores", "Catálogo de rutas ilimitado", "Prioridad de generación"]}
+            cta="Empezar con Pro"
+            href="/empieza/ruta"
+            highlighted
           />
         </div>
       </div>
@@ -381,8 +371,8 @@ function FinalCta() {
             Tu primera ruta a medida está a un clic. Gratis, sin tarjeta.
           </p>
           <Button asChild size="lg" variant="accent" className="mt-8">
-            <Link href="/signup">
-              Crear mi ruta gratis <ArrowRight className="size-4" />
+            <Link href="/empieza/ruta">
+              Crear mi ruta ahora <ArrowRight className="size-4" />
             </Link>
           </Button>
         </div>
