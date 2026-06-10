@@ -8,6 +8,8 @@ import {
   CheckCircle2,
   Loader2,
   Trophy,
+  Lock,
+  Sparkles,
 } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
@@ -227,6 +229,32 @@ export default async function PathPage({
           );
         })}
       </div>
+
+      {/* Teaser de continuidad: la "ruta 2.0" existe pero se desbloquea al
+          completar — el estudiante SIEMPRE sabe que hay un después. */}
+      {path.lessonCount > 0 && path.completedLessons < path.lessonCount && (
+        <div className="mt-8 rounded-xl border border-dashed border-border bg-muted/40 p-5">
+          <div className="flex items-start gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full border border-border bg-card text-muted-foreground">
+              <Lock className="size-4" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                <Sparkles className="size-3.5" /> Tu siguiente ruta
+              </p>
+              <p className="mt-1 text-sm font-medium text-foreground">
+                Al completar esta ruta, la IA diseñará tu continuación a medida —
+                construida sobre lo que habrás dominado aquí.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {path.lessonCount - path.completedLessons === 1
+                  ? "Te falta solo 1 lección para desbloquearla. 🔥"
+                  : `Te faltan ${path.lessonCount - path.completedLessons} lecciones para desbloquearla.`}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
