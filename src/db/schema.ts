@@ -104,6 +104,10 @@ export const profiles = pgTable("profiles", {
   streakFreezes: integer("streak_freezes").default(2).notNull(), // perdón de racha
   // Email: copiado desde auth.users por handle_new_user (evita leer auth.* en cada envío).
   email: text("email"),
+  // Comunidad/leaderboard: visible por defecto con opt-out de 1 clic; el alias
+  // reemplaza al nombre de pila si el usuario lo prefiere. NUNCA se expone PII.
+  leaderboardVisible: boolean("leaderboard_visible").default(true).notNull(),
+  leaderboardAlias: text("leaderboard_alias"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
@@ -393,6 +397,7 @@ export const xpEvents = pgTable(
       t.refId,
     ),
     userWeekIdx: index("xp_events_user_week_idx").on(t.userId, t.weekStart),
+    weekUserIdx: index("xp_events_week_user_idx").on(t.weekStart, t.userId), // ranking semanal
   }),
 );
 

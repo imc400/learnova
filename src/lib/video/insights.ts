@@ -18,28 +18,39 @@ import { env } from "@/lib/env";
     sin anclaje (igual que hoy). El pipeline jamás se frena por un digest.
 */
 
+// outline y quizAnchors son el corazón (estrictos); el resto tolera la forma
+// imperfecta que Gemini a veces emite (catch → default, no se pierde el digest).
 export const videoDigestSchema = z.object({
   outline: z.array(
-    z.object({ timestampSeconds: z.number(), topic: z.string() }),
+    z.object({ timestampSeconds: z.coerce.number(), topic: z.coerce.string() }),
   ),
-  keyConcepts: z.array(z.string()),
-  examples: z.array(
-    z.object({ timestampSeconds: z.number(), description: z.string() }),
-  ),
-  terminology: z.array(z.string()),
+  keyConcepts: z.array(z.coerce.string()).catch([]),
+  examples: z
+    .array(
+      z.object({
+        timestampSeconds: z.coerce.number(),
+        description: z.coerce.string(),
+      }),
+    )
+    .catch([]),
+  terminology: z.array(z.coerce.string()).catch([]),
   quizAnchors: z.array(
     z.object({
-      timestampSeconds: z.number(),
-      fact: z.string(),
-      questionIdea: z.string(),
+      timestampSeconds: z.coerce.number(),
+      fact: z.coerce.string(),
+      questionIdea: z.coerce.string().catch(""),
     }),
   ),
-  coverage: z
+  coverage: z.coerce
     .number()
+    .catch(0.7)
     .describe("0-1: cuánto del objetivo de la lección cubre el video"),
-  coverageNotes: z.string(),
-  apparentLevel: z.string(),
-  audioLanguage: z.string().describe("idioma del AUDIO hablado (ISO 639-1)"),
+  coverageNotes: z.coerce.string().catch(""),
+  apparentLevel: z.coerce.string().catch(""),
+  audioLanguage: z.coerce
+    .string()
+    .catch("es")
+    .describe("idioma del AUDIO hablado (ISO 639-1)"),
 });
 export type VideoDigest = z.infer<typeof videoDigestSchema>;
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LogOut, LayoutGrid, Plus } from "lucide-react";
+import { LogOut, LayoutGrid, Plus, Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getUserStats } from "@/server/queries/gamification";
 import { Logo } from "@/components/brand/logo";
@@ -32,6 +32,9 @@ export default async function AppLayout({
               </Link>
               <Link href="/app/crear" className="flex items-center gap-1.5 hover:text-foreground">
                 <Plus className="size-4" /> Crear ruta
+              </Link>
+              <Link href="/app/comunidad" className="flex items-center gap-1.5 hover:text-foreground">
+                <Users className="size-4" /> Comunidad
               </Link>
             </nav>
           </div>
