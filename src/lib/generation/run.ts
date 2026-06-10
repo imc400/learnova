@@ -3,6 +3,7 @@ import { db } from "@/db";
 import {
   learningPaths,
   skeletonCache,
+  lessonContentCache,
   modules as modulesT,
   lessons as lessonsT,
   quizzes as quizzesT,
@@ -17,7 +18,14 @@ import {
 } from "@/lib/ai/generate";
 import { curateVideoForLesson } from "@/lib/youtube/curate";
 import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
-import type { Intake, PathSkeleton, LessonContent } from "@/lib/ai/schemas";
+import type {
+  Intake,
+  PathSkeleton,
+  LessonContent,
+  GeneratedQuiz,
+} from "@/lib/ai/schemas";
+
+type GeneratedQuizData = GeneratedQuiz;
 import { env } from "@/lib/env";
 
 /**
@@ -180,7 +188,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
         .where(eq(learningPaths.id, pathId));
     };
 
-    for (const { m, lessons } of plan) {
+    for (const [mi, { m, lessons }] of plan.entries()) {
       // STAGE A — queries de video del módulo entero en 1 llamada Haiku
       // (desde los STUBS: el video se elige ANTES de escribir la lección).
       let queryByIndex = new Map<number, string>();
@@ -202,6 +210,56 @@ export async function runPathGeneration(pathId: string): Promise<void> {
 
       await Promise.all(
         lessons.map(async ({ id: lessonId, ls }, li) => {
+          // CACHÉ DE CONTENIDO: si otro usuario del mismo esqueleto ya pagó
+          // esta lección, se reutiliza entera (contenido + quiz) — la ruta
+          // repetida cuesta ~$0 y se genera en segundos.
+          const [cachedLesson] = await db
+            .select()
+            .from(lessonContentCache)
+            .where(
+              and(
+                eq(lessonContentCache.cacheKey, cacheKey),
+                eq(lessonContentCache.moduleIndex, mi),
+                eq(lessonContentCache.lessonIndex, li),
+                eq(lessonContentCache.version, 1),
+              ),
+            )
+            .limit(1);
+          if (cachedLesson) {
+            const cachedContent = cachedLesson.content as LessonContent;
+            await Promise.all([
+              db
+                .update(lessonsT)
+                .set({
+                  content: cachedContent,
+                  notes: cachedContent.keyTakeaways.join("\n• "),
+                })
+                .where(eq(lessonsT.id, lessonId)),
+              // Videos para la página (búsquedas ya cacheadas → barato).
+              curateAndSaveVideo(
+                lessonId,
+                queryByIndex.get(li) ?? ls.title,
+                m.objective,
+                intake.language,
+              ),
+              cachedLesson.quiz
+                ? saveQuizData(lessonId, ls.title, cachedLesson.quiz as GeneratedQuizData).catch(
+                    (e) => console.error(`[generation] quiz cacheado falló:`, e),
+                  )
+                : Promise.resolve(),
+              db
+                .update(lessonContentCache)
+                .set({
+                  timesReused: sql`${lessonContentCache.timesReused} + 1`,
+                  updatedAt: new Date(),
+                })
+                .where(eq(lessonContentCache.id, cachedLesson.id)),
+            ]);
+            done++;
+            await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
+            return;
+          }
+
           // STAGE B — curar video + digest del top-1 (con coverage gate).
           const query = queryByIndex.get(li) ?? ls.title;
           const vids = await curateAndSaveVideo(lessonId, query, m.objective, intake.language);
@@ -259,7 +317,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             .where(eq(lessonsT.id, lessonId));
 
           // STAGE D — quiz DESPUÉS de la lección, grounded en contenido + anclas.
-          await generateAndSaveQuiz(
+          const quizData = await generateAndSaveQuiz(
             lessonId,
             ls.title,
             ls.summary,
@@ -268,9 +326,33 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             content,
             digest,
             topVideo?.durationSeconds ?? null,
-          ).catch((e) =>
-            console.error(`[generation] quiz falló (lección ${lessonId}):`, e),
-          );
+          ).catch((e) => {
+            console.error(`[generation] quiz falló (lección ${lessonId}):`, e);
+            return null;
+          });
+
+          // Cachear el canónico: los siguientes usuarios del esqueleto reciben
+          // esta lección (y su quiz) gratis y al instante.
+          await db
+            .insert(lessonContentCache)
+            .values({
+              cacheKey,
+              moduleIndex: mi,
+              lessonIndex: li,
+              content,
+              quiz: quizData,
+            })
+            .onConflictDoNothing({
+              target: [
+                lessonContentCache.cacheKey,
+                lessonContentCache.moduleIndex,
+                lessonContentCache.lessonIndex,
+                lessonContentCache.version,
+              ],
+            })
+            .catch((e) =>
+              console.error(`[generation] cache de lección falló:`, e),
+            );
 
           done++;
           await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
@@ -325,28 +407,12 @@ export async function runPathGeneration(pathId: string): Promise<void> {
   }
 }
 
-/** Genera y guarda el quiz de una lección en una transacción (idempotente).
- *  Corre DESPUÉS de la lección: recibe contenido final + digest del video para
- *  que las preguntas evalúen lo que el estudiante realmente vio y leyó. */
-async function generateAndSaveQuiz(
+/** Inserta un quiz (generado o cacheado) en una transacción idempotente. */
+async function saveQuizData(
   lessonId: string,
   title: string,
-  summary: string,
-  level: string,
-  language: string,
-  lessonContent?: LessonContent | null,
-  videoDigest?: VideoDigest | null,
-  videoDurationSeconds?: number | null,
+  quiz: GeneratedQuizData,
 ) {
-  const quiz = await generateQuiz({
-    lessonTitle: title,
-    lessonSummary: summary,
-    level,
-    language,
-    lessonContent,
-    videoDigest,
-    videoDurationSeconds,
-  });
   const mmss = (s: number) =>
     `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
   await db.transaction(async (tx) => {
@@ -370,13 +436,39 @@ async function generateAndSaveQuiz(
           correctAnswer: q.correctOptionIds,
           // El grounding validado viaja en la explicación (visible al corregir).
           explanation:
-            q.grounding.timestampSeconds != null
+            q.grounding?.timestampSeconds != null
               ? `${q.explanation} ⏱ El video lo explica en ${mmss(q.grounding.timestampSeconds)}.`
               : q.explanation,
         })),
       );
     }
   });
+}
+
+/** Genera y guarda el quiz de una lección (devuelve el quiz para cachearlo).
+ *  Corre DESPUÉS de la lección: recibe contenido final + digest del video para
+ *  que las preguntas evalúen lo que el estudiante realmente vio y leyó. */
+async function generateAndSaveQuiz(
+  lessonId: string,
+  title: string,
+  summary: string,
+  level: string,
+  language: string,
+  lessonContent?: LessonContent | null,
+  videoDigest?: VideoDigest | null,
+  videoDurationSeconds?: number | null,
+): Promise<GeneratedQuizData> {
+  const quiz = await generateQuiz({
+    lessonTitle: title,
+    lessonSummary: summary,
+    level,
+    language,
+    lessonContent,
+    videoDigest,
+    videoDurationSeconds,
+  });
+  await saveQuizData(lessonId, title, quiz);
+  return quiz;
 }
 
 /** Cura y guarda videos de una lección (idempotente; nunca aborta la ruta).

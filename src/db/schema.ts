@@ -132,6 +132,36 @@ export const skeletonCache = pgTable(
   }),
 );
 
+// ---------- Caché de CONTENIDO de lección (canónico por esqueleto) ----------
+// Extiende el patrón skeleton_cache al contenido: cada usuario del mismo
+// tema+nivel+idioma reutiliza las lecciones y quizzes ya generados (el mayor
+// ahorro de la plataforma: ~USD 1.5-2 de Sonnet por ruta repetida, y la
+// generación pasa de minutos a segundos). El contenido es canónico — lo
+// personal vive en el overlay (plan de intake), nunca aquí.
+export const lessonContentCache = pgTable(
+  "lesson_content_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cacheKey: text("cache_key").notNull(), // = skeleton_cache.cache_key
+    moduleIndex: integer("module_index").notNull(),
+    lessonIndex: integer("lesson_index").notNull(),
+    version: integer("version").default(1).notNull(),
+    content: jsonb("content").notNull(), // LessonContent (incl. videoGuide canónico)
+    quiz: jsonb("quiz"), // GeneratedQuiz (preguntas listas para insertar)
+    timesReused: integer("times_reused").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqLesson: uniqueIndex("lesson_content_cache_key_idx").on(
+      t.cacheKey,
+      t.moduleIndex,
+      t.lessonIndex,
+      t.version,
+    ),
+  }),
+);
+
 // ---------- Caché de búsquedas de YouTube (conserva cuota de la API) ----------
 export const youtubeSearchCache = pgTable(
   "youtube_search_cache",
