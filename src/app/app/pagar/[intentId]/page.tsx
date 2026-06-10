@@ -17,6 +17,7 @@ import { routeIntents } from "@/db/schema";
 import { startIntentCheckoutAction } from "@/server/actions/checkout";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { providerLabel } from "@/lib/payments/provider";
 import { env } from "@/lib/env";
 
 export const metadata = { title: "Tu ruta te espera" };
@@ -151,9 +152,9 @@ export default async function PagarPage({
           </SubmitButton>
         </form>
         <p className="mt-3 text-center text-xs text-muted-foreground">
-          Pago seguro vía {env.MP_ACCESS_TOKEN ? "Mercado Pago" : "Flow"}{" "}
-          (tarjetas, débito). Tu ruta se empieza a generar apenas se confirma —
-          y tu profesor te estará esperando.
+          Pago seguro vía {providerLabel()} (tarjetas, débito). Tu ruta se
+          empieza a generar apenas se confirma — y tu profesor te estará
+          esperando.
         </p>
       </div>
 

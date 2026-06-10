@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { pathPurchases, learningPaths, routeIntents } from "@/db/schema";
 import { createPayment } from "@/lib/payments/flow";
 import { createPreference } from "@/lib/payments/mercadopago";
+import { activeProvider } from "@/lib/payments/provider";
 import { env } from "@/lib/env";
 
 /**
@@ -37,7 +38,7 @@ export async function startIntentCheckoutAction(intentId: string) {
   const returnUrl = `${env.NEXT_PUBLIC_SITE_URL}/app/pagar/${intent.id}/retorno`;
   let redirectUrl: string;
   try {
-    if (env.MP_ACCESS_TOKEN) {
+    if (activeProvider() === "mercadopago") {
       // Mercado Pago (preferido): Checkout Pro vía external_reference.
       const pref = await createPreference({
         externalReference: `intent_${intent.id}`,

@@ -54,7 +54,7 @@ export default async function AdminPage() {
     { icon: CheckCircle2, label: "Activación", value: `${kpis.activationPct}%`, sub: `${kpis.lessonsCompleted} lecciones completadas` },
     { icon: GraduationCap, label: "Clases en vivo", value: kpis.liveClasses, sub: `${kpis.liveMinutes} min hablados` },
     { icon: ShoppingCart, label: "Checkout", value: kpis.intentsTotal ? `${kpis.intentsPaid}/${kpis.intentsTotal}` : "—", sub: kpis.intentsPending ? `${kpis.intentsPending} carros abandonados` : "paywall sin tráfico aún" },
-    { icon: Banknote, label: "Ingresos", value: `$${kpis.revenueClp.toLocaleString("es-CL")}`, sub: "CLP confirmados por Flow" },
+    { icon: Banknote, label: "Ingresos", value: `$${kpis.revenueClp.toLocaleString("es-CL")}`, sub: "CLP confirmados (pagos acreditados)" },
   ];
 
   const maxFunnel = Math.max(...funnel.map((f) => f.count), 1);

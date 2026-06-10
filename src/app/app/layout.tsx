@@ -54,9 +54,12 @@ export default async function AppLayout({
                 levelProgress={stats.levelProgress}
               />
             )}
-            <span className="hidden text-sm text-muted-foreground lg:inline">
+            <Link
+              href="/app/perfil"
+              className="hidden text-sm text-muted-foreground hover:text-foreground lg:inline"
+            >
               {user.email}
-            </span>
+            </Link>
             <form action="/auth/signout" method="post">
               <Button type="submit" variant="ghost" size="icon" aria-label="Cerrar sesión">
                 <LogOut className="size-4" />
