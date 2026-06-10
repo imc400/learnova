@@ -137,6 +137,31 @@ export async function generateModuleSkeleton(args: {
   return res.parsed_output;
 }
 
+/**
+ * Detector de TEXTO CORTADO: cuando el modelo emite una comilla doble sin
+ * escapar dentro de un string JSON, la decodificación restringida cierra el
+ * campo ahí y el resto de la frase se pierde en silencio (caso real: 'como
+ * cuando el médico te dice ' ← faltaba «aaah»). Heurística: un cuerpo sano
+ * termina con puntuación de cierre; uno cortado termina en letra, coma,
+ * paréntesis abierto o espacio.
+ */
+const HEALTHY_ENDING = /[.!?…)\]»>'"*_`:;%。！？]$/;
+export function looksTruncated(text: string): boolean {
+  const t = text.trimEnd();
+  if (!t) return false;
+  return !HEALTHY_ENDING.test(t);
+}
+
+function truncatedFields(content: LessonContent): string[] {
+  const bad: string[] = [];
+  if (looksTruncated(content.intro)) bad.push("intro");
+  content.sections.forEach((s, i) => {
+    if (looksTruncated(s.body)) bad.push(`sección ${i + 1} (${s.heading})`);
+  });
+  if (looksTruncated(content.practice)) bad.push("practice");
+  return bad;
+}
+
 /** NIVEL 2 — Sonnet 4.6 genera el contenido de una lección.
  *  Si llega videoDigest, la lección se genera ANCLADA al video en esta misma
  *  llamada (terminología del creador, orden compatible, videoGuide con minutos
@@ -153,36 +178,50 @@ export async function generateLessonContent(args: {
 }): Promise<LessonContent> {
   const client = getAnthropic();
   const hasDigest = !!args.videoDigest;
-  const res = await client.messages.parse({
-    model: MODELS.generator,
-    max_tokens: MAX_TOKENS.generator,
-    system: cachedSystem(
-      `${SYSTEM_PEDAGOGY}\n\n${LESSON_INSTRUCTIONS}\n\n${LESSON_VIDEO_ANCHOR_INSTRUCTIONS}`,
-    ),
-    output_config: { format: zodOutputFormat(lessonContentSchema) },
-    messages: [
-      {
-        role: "user",
-        content: [
-          `Ruta: ${args.pathTitle}`,
-          `Módulo: ${args.moduleTitle} — Objetivo: ${args.moduleObjective}`,
-          `Lección: ${args.lessonTitle}`,
-          `Resumen esperado: ${args.lessonSummary}`,
-          `Nivel: ${args.level} · Idioma: ${args.language}`,
-          "",
-          hasDigest
-            ? digestContext(args.videoDigest!)
-            : "SIN digest de video disponible → videoGuide debe ser null.",
-          "",
-          "Genera el contenido de esta lección y una buena query para buscar su video de apoyo en YouTube.",
-        ].join("\n"),
-      },
-    ],
-  });
-  if (!res.parsed_output) {
-    throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
+  const baseUser = [
+    `Ruta: ${args.pathTitle}`,
+    `Módulo: ${args.moduleTitle} — Objetivo: ${args.moduleObjective}`,
+    `Lección: ${args.lessonTitle}`,
+    `Resumen esperado: ${args.lessonSummary}`,
+    `Nivel: ${args.level} · Idioma: ${args.language}`,
+    "",
+    hasDigest
+      ? digestContext(args.videoDigest!)
+      : "SIN digest de video disponible → videoGuide debe ser null.",
+    "",
+    "Genera el contenido de esta lección y una buena query para buscar su video de apoyo en YouTube.",
+  ].join("\n");
+
+  let content: LessonContent | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await client.messages.parse({
+      model: MODELS.generator,
+      max_tokens: MAX_TOKENS.generator,
+      system: cachedSystem(
+        `${SYSTEM_PEDAGOGY}\n\n${LESSON_INSTRUCTIONS}\n\n${LESSON_VIDEO_ANCHOR_INSTRUCTIONS}`,
+      ),
+      output_config: { format: zodOutputFormat(lessonContentSchema) },
+      messages: [
+        {
+          role: "user",
+          content:
+            attempt === 0
+              ? baseUser
+              : `${baseUser}\n\nIMPORTANTE: el intento anterior quedó con frases CORTADAS por usar comillas dobles. NO uses comillas dobles (") en ningún texto — solo 'simples', «latinas» o *cursiva* — y termina cada sección con puntuación final.`,
+        },
+      ],
+    });
+    if (!res.parsed_output) {
+      throw new Error("[ai] parsed_output null (posible refusal o JSON inválido).");
+    }
+    content = res.parsed_output;
+    const bad = truncatedFields(content);
+    if (!bad.length) break;
+    console.warn(
+      `[ai] lección "${args.lessonTitle}": texto cortado en ${bad.join(", ")} (intento ${attempt + 1})`,
+    );
   }
-  const content = res.parsed_output;
+  if (!content) throw new Error("[ai] generación de lección falló.");
   // Cinturón y tirantes: sin digest no puede existir videoGuide; con digest,
   // cada momento debe corresponder a un timestamp real (±60s de outline/anchors).
   if (!hasDigest) return { ...content, videoGuide: null };

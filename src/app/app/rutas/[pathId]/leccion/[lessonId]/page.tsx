@@ -16,6 +16,7 @@ import { YouTubeEmbed } from "@/components/app/youtube-embed";
 import { Quiz } from "@/components/app/quiz";
 import { TutorChat } from "@/components/app/tutor-chat";
 import { SubmitButton } from "@/components/app/submit-button";
+import { RichText } from "@/components/app/rich-text";
 import type { LessonContent } from "@/lib/ai/schemas";
 
 export default async function LessonPage({
@@ -92,13 +93,15 @@ export default async function LessonPage({
         {/* Contenido de la lección */}
         {content ? (
           <div className="mt-8 flex flex-col gap-6">
-            <p className="text-lg leading-relaxed text-foreground">{content.intro}</p>
+            <p className="text-lg leading-relaxed text-foreground">
+              <RichText text={content.intro} />
+            </p>
 
             {content.sections.map((s, i) => (
               <section key={i}>
                 <h2 className="font-display text-xl font-semibold">{s.heading}</h2>
                 <p className="mt-2 whitespace-pre-wrap leading-relaxed text-muted-foreground">
-                  {s.body}
+                  <RichText text={s.body} />
                 </p>
               </section>
             ))}
@@ -111,7 +114,10 @@ export default async function LessonPage({
                 <ul className="mt-3 space-y-1.5 text-sm">
                   {content.keyTakeaways.map((k, i) => (
                     <li key={i} className="flex gap-2">
-                      <span className="text-primary">•</span> {k}
+                      <span className="text-primary">•</span>
+                      <span>
+                        <RichText text={k} />
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -123,7 +129,9 @@ export default async function LessonPage({
                 <h3 className="flex items-center gap-2 font-display font-semibold">
                   <ListChecks className="size-5 text-primary" /> Practica
                 </h3>
-                <p className="mt-2 text-sm text-muted-foreground">{content.practice}</p>
+                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
+                  <RichText text={content.practice} />
+                </p>
               </div>
             )}
           </div>

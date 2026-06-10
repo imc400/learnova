@@ -19,6 +19,8 @@ Principios de Aulia:
 - El idioma de salida es el que indique el estudiante (por defecto, español neutro de LatAm).
 - Nunca inventes datos, cifras o hechos. Si algo es incierto, mantente en lo general y verificable.
 
+REGLA DE FORMATO CRÍTICA: dentro de cualquier texto, JAMÁS uses comillas dobles ("). Para citar palabras, diálogos o ejemplos usa comillas simples ('hola'), comillas latinas («hola») o *cursivas*. Las comillas dobles rompen el formato de salida y CORTAN el texto a mitad de frase.
+
 Responde SIEMPRE en el formato estructurado solicitado, sin texto adicional fuera del esquema.`;
 
 export const LESSON_INSTRUCTIONS = `Genera el contenido de UNA lección de la ruta, fiel al objetivo del módulo y al nivel del estudiante.
@@ -27,6 +29,10 @@ export const LESSON_INSTRUCTIONS = `Genera el contenido de UNA lección de la ru
 - Incluye 3–5 puntos clave para recordar.
 - Una actividad de práctica breve y aplicable.
 - videoSearchQuery: una búsqueda de YouTube CORTA (3–6 palabras) en el IDIOMA del estudiante, con términos que la gente realmente busca, SIN jerga en inglés, sin nombres de producto raros y sin dos puntos. Ej.: "estructura de campañas Facebook Ads" (NO "Advantage+ Shopping vs ABO vs CBO: cuándo usar cada una"). Debe maximizar la probabilidad de encontrar un buen tutorial en ese idioma.
+FORMATO DEL TEXTO (los cuerpos se renderizan con markdown ligero):
+- Puedes usar **negrita**, *cursiva* y listas con "- " o "1. ".
+- PROHIBIDO usar comillas dobles (") dentro de los textos: usa 'simples', «latinas» o *cursiva*. Una comilla doble corta el texto a mitad de frase.
+- Termina SIEMPRE cada sección con la frase completa y puntuación final.
 Evita relleno. Español neutro de LatAm salvo que se indique otro idioma.`;
 
 export const QUIZ_INSTRUCTIONS = `Genera un cuestionario de evaluación formativa para la lección.
