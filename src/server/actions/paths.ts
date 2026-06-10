@@ -11,6 +11,7 @@ import { intakeSchema } from "@/lib/ai/schemas";
 import {
   generateWizardQuestions,
   fallbackQuestions,
+  generateRoutePreview,
   type WizardQuestion,
 } from "@/lib/ai/wizard";
 import { enqueuePathGeneration } from "@/lib/generation/run";
@@ -195,7 +196,29 @@ export async function createRouteIntentAction(input: {
     .returning({ id: routeIntents.id });
   if (!intent) throw new Error("No se pudo guardar tu solicitud.");
 
-  if (paywallOn) redirect(`/app/pagar/${intent.id}`);
+  if (paywallOn) {
+    // Preview real para el paywall (Haiku ~1 s; si falla, el paywall degrada).
+    const preview = await generateRoutePreview({
+      topic: intake.topic,
+      level: intake.level,
+      goal: intake.goal,
+      language: intake.language,
+    });
+    if (preview) {
+      await db
+        .update(routeIntents)
+        .set({
+          preview: {
+            modules: preview.modules,
+            hook: preview.hook,
+            metaDisplay: intake.goal.split(".")[0]?.slice(0, 160) ?? "",
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(routeIntents.id, intent.id));
+    }
+    redirect(`/app/pagar/${intent.id}`);
+  }
 
   // Sin paywall: techo de costos free de siempre (cupo ganado al completar).
   if (!isPro) {

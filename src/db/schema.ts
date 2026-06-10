@@ -148,6 +148,12 @@ export const routeIntents = pgTable(
     phone: text("phone"),
     // pending_payment → paid (webhook) | bypassed (paywall off / Pro / admin)
     status: text("status").default("pending_payment").notNull(),
+    // Preview REAL para el paywall (Haiku): títulos de módulos + gancho.
+    preview: jsonb("preview").$type<{
+      modules: string[];
+      hook: string;
+      metaDisplay: string;
+    }>(),
     pathId: uuid("path_id").references(() => learningPaths.id, {
       onDelete: "set null",
     }),

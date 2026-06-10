@@ -1,0 +1,1 @@
+ALTER TABLE "route_intents" ADD COLUMN "preview" jsonb;

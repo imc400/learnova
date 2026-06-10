@@ -6,6 +6,7 @@ import { isAdminUser } from "@/lib/admin";
 import { getUserStats } from "@/server/queries/gamification";
 import { Logo } from "@/components/brand/logo";
 import { UserStatsChips } from "@/components/app/user-stats-chips";
+import { SupportBubble } from "@/components/app/support-bubble";
 import { Button } from "@/components/ui/button";
 
 export default async function AppLayout({
@@ -65,6 +66,7 @@ export default async function AppLayout({
         </div>
       </header>
       <main className="container-page py-8">{children}</main>
+      <SupportBubble />
       <footer className="border-t border-border">
         <div className="container-page flex flex-wrap items-center gap-x-4 gap-y-1 py-4 text-xs text-muted-foreground">
           <span>© Aulia</span>

@@ -48,7 +48,12 @@ export async function createPreference(
         },
       ],
       external_reference: input.externalReference,
-      payer: { email: input.payerEmail },
+      // En modo TEST, MP rechaza pagos si el payer.email corresponde a una
+      // cuenta real de MP (o al propio vendedor) — se omite y el comprador
+      // lo ingresa como invitado. En producción sí se pre-rellena.
+      ...(env.MP_ACCESS_TOKEN?.startsWith("TEST-")
+        ? {}
+        : { payer: { email: input.payerEmail } }),
       back_urls: {
         success: input.returnUrl,
         pending: input.returnUrl,

@@ -78,6 +78,52 @@ export function fallbackQuestions(topic: string): WizardQuestion[] {
   ];
 }
 
+export const routePreviewSchema = z.object({
+  modules: z
+    .array(z.string().max(80))
+    .min(5)
+    .max(7)
+    .describe("Títulos REALES y específicos de los módulos de la ruta, en orden pedagógico"),
+  hook: z
+    .string()
+    .max(160)
+    .describe("1 frase que conecta la meta del estudiante con lo que va a lograr — concreta, sin hype vacío"),
+});
+export type RoutePreview = z.infer<typeof routePreviewSchema>;
+
+const PREVIEW_INSTRUCTIONS = `Eres el diseñador instruccional de Aulia. Con el tema, nivel y meta del estudiante, esboza el ÍNDICE de su ruta personalizada: 5-7 títulos de módulos específicos y accionables (como capítulos de un temario real, no genéricos) más una frase-gancho que conecte SU meta con el resultado. Idioma del estudiante. Es el adelanto que verá antes de pagar: debe sentirse hecho exactamente para él/ella.`;
+
+/**
+ * Adelanto REAL de la ruta para el paywall (Haiku, ~1 s, ~$0.001). El índice
+ * definitivo lo hace Opus tras el pago; este preview es honesto pero barato.
+ */
+export async function generateRoutePreview(args: {
+  topic: string;
+  level: string;
+  goal: string;
+  language: string;
+}): Promise<RoutePreview | null> {
+  try {
+    const client = getAnthropic();
+    const res = await client.messages.parse({
+      model: MODELS.ranker,
+      max_tokens: 800,
+      system: cachedSystem(PREVIEW_INSTRUCTIONS),
+      output_config: { format: zodOutputFormat(routePreviewSchema) },
+      messages: [
+        {
+          role: "user",
+          content: `Tema: ${args.topic}\nNivel: ${args.level}\nMeta del estudiante: ${args.goal}\nIdioma: ${args.language}\nEsboza el índice de su ruta.`,
+        },
+      ],
+    });
+    return res.parsed_output ?? null;
+  } catch (e) {
+    console.error("[wizard] preview falló (el paywall usa fallback):", e);
+    return null;
+  }
+}
+
 /** Genera las preguntas adaptativas para un tema (Haiku, ~1-2 s). */
 export async function generateWizardQuestions(args: {
   topic: string;

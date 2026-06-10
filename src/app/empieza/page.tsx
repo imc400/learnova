@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
+import { SupportBubble } from "@/components/app/support-bubble";
 
 /*
   LANDING DE ADS — alta conversión, propósito único.
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
     "Dinos qué quieres lograr y la IA te arma una ruta a tu medida: lecciones, los mejores videos, pruebas reales y un profesor particular que te enseña por voz.",
 };
 
-const CTA_HREF = "/signup?next=%2Fapp%2Fcrear";
+const CTA_HREF = "/empieza/ruta";
 
 function Cta({ label = "Crear mi ruta ahora" }: { label?: string }) {
   return (
@@ -235,6 +236,7 @@ export default function EmpiezaPage() {
         </p>
       </section>
 
+      <SupportBubble />
       <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
         © Aulia ·{" "}
         <Link href="/terminos" className="hover:underline">
