@@ -6,9 +6,40 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { learningPaths, xpEvents } from "@/db/schema";
 import { intakeSchema } from "@/lib/ai/schemas";
+import {
+  generateWizardQuestions,
+  fallbackQuestions,
+  type WizardQuestion,
+} from "@/lib/ai/wizard";
 import { enqueuePathGeneration } from "@/lib/generation/run";
 import { getEntitlement, FREE_PATH_LIMIT } from "@/lib/subscription";
 import { slugify } from "@/lib/utils";
+
+/**
+ * Paso 1 → 2 del intake adaptativo: preguntas a medida del tema (Haiku).
+ * Nunca falla hacia el usuario: si la IA no responde, hay set de respaldo.
+ */
+export async function wizardQuestionsAction(args: {
+  topic: string;
+  level: string;
+  language: string;
+}): Promise<{ questions: WizardQuestion[]; adaptive: boolean }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const topic = String(args.topic ?? "").trim().slice(0, 120);
+  const level = ["principiante", "intermedio", "avanzado"].includes(args.level)
+    ? args.level
+    : "principiante";
+  const language = ["es", "en", "pt"].includes(args.language) ? args.language : "es";
+  if (topic.length < 2) {
+    return { questions: fallbackQuestions(topic || "este tema"), adaptive: false };
+  }
+  return generateWizardQuestions({ topic, level, language });
+}
 
 /** Crea una ruta desde el cuestionario de intake y dispara su generación. */
 export async function createPathAction(formData: FormData) {
