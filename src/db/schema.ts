@@ -654,6 +654,7 @@ export const liveSessions = pgTable(
       .references(() => learningPaths.id, { onDelete: "cascade" })
       .notNull(),
     status: liveSessionStatus("status").default("scheduled").notNull(),
+    kind: text("kind").default("class").notNull(), // class | induction
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),

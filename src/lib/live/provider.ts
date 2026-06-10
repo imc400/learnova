@@ -42,6 +42,33 @@ export async function createVoiceAgent(args: {
           prompt: {
             prompt: args.systemPrompt,
             llm: "claude-sonnet-4-6",
+            // Herramientas de PIZARRA: corren en el navegador del alumno
+            // (client tools) y mueven la UI mientras el profesor habla.
+            tools: [
+              {
+                type: "client",
+                name: "mostrar_ruta",
+                description:
+                  "Muestra el mapa completo de la ruta en la pantalla del alumno (la pizarra). Úsala cuando vayas a recorrer la ruta o quieras que vea la estructura completa.",
+                parameters: { type: "object", properties: {}, required: [] },
+              },
+              {
+                type: "client",
+                name: "enfocar_modulo",
+                description:
+                  "Resalta UN módulo en la pizarra del alumno y muestra sus lecciones. Úsala cuando expliques un módulo específico.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    moduleIndex: {
+                      type: "integer",
+                      description: "Índice del módulo desde 0 (módulo 1 = 0)",
+                    },
+                  },
+                  required: ["moduleIndex"],
+                },
+              },
+            ],
           },
           first_message: args.greeting,
         },

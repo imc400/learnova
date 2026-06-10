@@ -186,18 +186,29 @@ export default async function PathPage({
                         Una clase de 25 min por voz para resolver tus dudas y
                         afianzar lo que viene.
                       </p>
-                      <form action={startClassAction.bind(null, path.id)} className="mt-3">
+                      <form action={startClassAction.bind(null, path.id, "class")} className="mt-3">
                         <SubmitButton variant="primary" size="sm" pendingText="Preparando tu clase…">
                           <GraduationCap className="size-4" /> Iniciar clase ahora
                         </SubmitButton>
                       </form>
                     </>
                   ) : (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Se desbloquea al {CLASS_UNLOCK_PCT}% de avance (vas en{" "}
-                      {pct}%) — así llegas con preguntas reales y la clase vale
-                      oro.
-                    </p>
+                    <>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        La clase completa se desbloquea al {CLASS_UNLOCK_PCT}%
+                        de avance (vas en {pct}%). Pero tu profesor ya quiere
+                        conocerte:
+                      </p>
+                      <form
+                        action={startClassAction.bind(null, path.id, "induction")}
+                        className="mt-3"
+                      >
+                        <SubmitButton variant="outline" size="sm" pendingText="Preparando…">
+                          <GraduationCap className="size-4" /> Clase de
+                          inducción: conoce a tu profesor (10 min)
+                        </SubmitButton>
+                      </form>
+                    </>
                   )}
                 </div>
               </div>

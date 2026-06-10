@@ -20,7 +20,13 @@ const MAX_CLASS_MINUTES = 30;
  * del profesor (y su agente de voz, lazy) y crea la sesión. El aula genera
  * las credenciales efímeras al cargar.
  */
-export async function startClassAction(pathId: string) {
+export async function startClassAction(
+  pathId: string,
+  kind: "class" | "induction" = "class",
+) {
+  // Vía <form action={startClassAction.bind(null, id)}> llega un FormData como
+  // segundo argumento — cualquier cosa que no sea "induction" es clase normal.
+  const sessionKind = kind === "induction" ? "induction" : "class";
   if (env.LIVE_CLASSES_ENABLED === "false") {
     throw new Error("Las clases en vivo están temporalmente desactivadas.");
   }
@@ -118,6 +124,7 @@ export async function startClassAction(pathId: string) {
     .values({
       userId: user.id,
       pathId,
+      kind: sessionKind,
       status: "in_progress",
       startedAt: new Date(),
     })

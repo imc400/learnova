@@ -24,6 +24,8 @@ interface AulaProps {
   teacherName: string;
   specialty: string;
   pathId: string;
+  /** Mapa de la ruta para la PIZARRA que el profesor controla en vivo. */
+  outline: { title: string; lessons: string[] }[];
 }
 
 export function AulaClient(props: AulaProps) {
@@ -43,11 +45,15 @@ function AulaInner({
   teacherName,
   specialty,
   pathId,
+  outline,
 }: AulaProps) {
   const router = useRouter();
   const [elapsed, setElapsed] = useState(0);
   const [ending, setEnding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // PIZARRA: el profesor la abre y enfoca módulos con sus client tools.
+  const [boardVisible, setBoardVisible] = useState(false);
+  const [focusedModule, setFocusedModule] = useState<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const endedRef = useRef(false);
@@ -61,9 +67,14 @@ function AulaInner({
       void finishClass();
     },
     onError: (message) => {
+      // Errores transitorios del stream NO terminan la clase: solo es fatal si
+      // nunca llegó a conectar (el caso real: permiso de micrófono denegado).
       console.error("[aula]", message);
-      setError("Se cortó la conexión con tu profesor. Puedes volver a entrar desde tu ruta.");
-      void finishClass();
+      if (!startedAtRef.current) {
+        setError(
+          "No pudimos iniciar la clase. Revisa el permiso del micrófono y vuelve a intentarlo.",
+        );
+      }
     },
   });
 
@@ -95,6 +106,20 @@ function AulaInner({
               prompt: { prompt },
               firstMessage,
               language,
+            },
+          },
+          // PIZARRA: el profesor llama estas tools y la UI reacciona en vivo.
+          clientTools: {
+            mostrar_ruta: async () => {
+              setBoardVisible(true);
+              setFocusedModule(null);
+              return "Pizarra visible con el mapa completo de la ruta.";
+            },
+            enfocar_modulo: async (params: { moduleIndex?: number }) => {
+              const idx = Number(params?.moduleIndex ?? 0);
+              setBoardVisible(true);
+              setFocusedModule(Number.isFinite(idx) ? idx : 0);
+              return `Módulo ${idx + 1} enfocado en la pizarra.`;
             },
           },
         });
@@ -137,7 +162,8 @@ function AulaInner({
   const speaking = conversation.isSpeaking;
 
   return (
-    <div className="mt-6 flex flex-col items-center rounded-2xl border border-border bg-card p-10 text-center shadow-soft">
+    <div className={`mt-6 grid gap-4 ${boardVisible ? "lg:grid-cols-[1fr_minmax(280px,360px)]" : ""}`}>
+    <div className="flex flex-col items-center rounded-2xl border border-border bg-card p-10 text-center shadow-soft">
       {/* Avatar del profesor con aura según estado */}
       <div
         className={`grid size-28 place-items-center rounded-full border-4 transition-all duration-500 ${
@@ -208,6 +234,46 @@ function AulaInner({
         Al terminar recibirás un correo con el resumen de la clase y tus tareas.
         La clase dura hasta 25-30 minutos.
       </p>
+    </div>
+
+    {/* PIZARRA — controlada por el profesor con sus herramientas */}
+    {boardVisible && (
+      <aside className="rounded-2xl border border-primary/30 bg-card p-5 shadow-soft">
+        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-primary">
+          📋 Pizarra de {teacherName}
+        </p>
+        <ol className="mt-3 space-y-2">
+          {outline.map((m, i) => {
+            const focused = focusedModule === i;
+            return (
+              <li
+                key={i}
+                className={`rounded-lg border px-3 py-2 transition-all duration-300 ${
+                  focused
+                    ? "border-primary bg-primary/10 shadow-soft"
+                    : focusedModule !== null
+                      ? "border-border opacity-50"
+                      : "border-border"
+                }`}
+              >
+                <p className={`text-sm font-semibold ${focused ? "text-primary" : ""}`}>
+                  {i + 1}. {m.title}
+                </p>
+                {focused && (
+                  <ul className="mt-1.5 space-y-0.5">
+                    {m.lessons.map((l, li) => (
+                      <li key={li} className="text-xs text-muted-foreground">
+                        · {l}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </aside>
+    )}
     </div>
   );
 }
