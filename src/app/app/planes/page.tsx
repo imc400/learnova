@@ -35,7 +35,7 @@ export default async function PlansPage() {
           <span className="text-sm text-muted-foreground">/mes</span>
         </div>
         <ul className="mt-5 space-y-2.5 text-sm">
-          {["Rutas ilimitadas", "Tutor en vivo ilimitado", "Pruebas y certificados", "Progreso y rachas"].map((f) => (
+          {["Rutas ilimitadas", "Tutor en vivo ilimitado", "Quizzes en cada lección", "Progreso, niveles y rachas"].map((f) => (
             <li key={f} className="flex items-center gap-2.5">
               <Check className="size-4 shrink-0 text-primary" /> {f}
             </li>

@@ -255,7 +255,7 @@ function Pricing() {
             price={formatPrice(0)}
             period=""
             description="Para probar cómo se siente tu ruta a medida."
-            features={["1 ruta de aprendizaje", "Lecciones y videos curados", "Tutor con límite diario"]}
+            features={["1 ruta de aprendizaje", "Lecciones y videos curados", "Tutor de IA incluido"]}
             cta="Empezar gratis"
             href="/signup"
           />
@@ -264,7 +264,7 @@ function Pricing() {
             price={formatPrice(subscriptionMonthly)}
             period="/mes"
             description="Aprende sin límites, con todo desbloqueado."
-            features={["Rutas ilimitadas", "Tutor en vivo ilimitado", "Pruebas y certificados", "Progreso y rachas"]}
+            features={["Rutas ilimitadas", "Tutor en vivo ilimitado", "Quizzes en cada lección", "Progreso, niveles y rachas"]}
             cta="Empezar Pro"
             href="/signup"
             highlighted

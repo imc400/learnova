@@ -102,11 +102,20 @@ export async function curateVideoForLesson(args: {
     (c.defaultLanguage || "").slice(0, 2).toLowerCase();
   const matched = allCandidates.filter((c) => langOf(c) === target);
   const unknown = allCandidates.filter((c) => !c.defaultLanguage);
-  const candidates = matched.length
+  const byLanguage = matched.length
     ? [...matched, ...unknown] // hay en el idioma → excluye los de otro idioma
     : unknown.length
       ? unknown // sin confirmados, pero hay sin etiqueta → dales la oportunidad
       : allCandidates; // todo en otro idioma → fallback subtitulado
+
+  // --- FILTRO DURO DE DURACIÓN (anti-Shorts) ---
+  // Un Short no sostiene una lección: exige un mínimo real de contenido.
+  // Solo si NO existe nada más largo se aceptan cortos (mejor algo que nada).
+  const MIN_LESSON_SECONDS = 180;
+  const longEnough = byLanguage.filter(
+    (c) => (c.durationSeconds ?? 0) >= MIN_LESSON_SECONDS,
+  );
+  const candidates = longEnough.length ? longEnough : byLanguage;
 
   const client = getAnthropic();
   const res = await client.messages.parse({

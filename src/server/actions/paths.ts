@@ -1,11 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { count, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { learningPaths } from "@/db/schema";
 import { intakeSchema } from "@/lib/ai/schemas";
 import { enqueuePathGeneration } from "@/lib/generation/run";
+import { getEntitlement, FREE_PATH_LIMIT } from "@/lib/subscription";
 import { slugify } from "@/lib/utils";
 
 /** Crea una ruta desde el cuestionario de intake y dispara su generación. */
@@ -15,6 +17,19 @@ export async function createPathAction(formData: FormData) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // Techo de costos: cada ruta cuesta dinero real (Opus + Sonnet + Gemini +
+  // cuota YouTube). El tier free tiene límite; Pro es ilimitado.
+  const { isPro } = await getEntitlement(user.id);
+  if (!isPro) {
+    const [row] = await db
+      .select({ n: count() })
+      .from(learningPaths)
+      .where(eq(learningPaths.userId, user.id));
+    if (Number(row?.n ?? 0) >= FREE_PATH_LIMIT) {
+      redirect("/app/planes?motivo=limite-rutas");
+    }
+  }
 
   const weekly = formData.get("weeklyHours");
   const parsed = intakeSchema.safeParse({

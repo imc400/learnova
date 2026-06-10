@@ -8,6 +8,7 @@ import {
   quizzes,
   questions,
   progress,
+  quizAttempts,
 } from "@/db/schema";
 
 /** Lección con su contexto (módulo + ruta), videos y quiz. Valida propiedad. */
@@ -48,12 +49,27 @@ export async function getLessonDetail(lessonId: string, userId: string) {
         .orderBy(asc(questions.orderIndex))
     : [];
 
-  // Estado de avance del usuario sobre esta lección.
-  const [prog] = await db
-    .select({ status: progress.status })
-    .from(progress)
-    .where(and(eq(progress.userId, userId), eq(progress.lessonId, lessonId)))
-    .limit(1);
+  // Estado de avance del usuario sobre esta lección + si ya aprobó el quiz.
+  const [[prog], [passedAttempt]] = await Promise.all([
+    db
+      .select({ status: progress.status })
+      .from(progress)
+      .where(and(eq(progress.userId, userId), eq(progress.lessonId, lessonId)))
+      .limit(1),
+    quiz
+      ? db
+          .select({ id: quizAttempts.id })
+          .from(quizAttempts)
+          .where(
+            and(
+              eq(quizAttempts.userId, userId),
+              eq(quizAttempts.quizId, quiz.id),
+              eq(quizAttempts.passed, true),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([] as { id: string }[]),
+  ]);
 
   return {
     lesson: row.lesson,
@@ -62,5 +78,6 @@ export async function getLessonDetail(lessonId: string, userId: string) {
     videos,
     quiz: quiz ? { ...quiz, questions: quizQuestions } : null,
     completed: prog?.status === "completed",
+    quizPassed: !!passedAttempt,
   };
 }

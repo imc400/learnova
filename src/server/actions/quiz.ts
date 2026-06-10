@@ -258,6 +258,40 @@ export async function completeLessonAction(
     .limit(1);
   if (!ctx || ctx.pathId !== pathId) throw new Error("Lección no encontrada");
 
+  // Gating de dominio: si la lección tiene quiz, completar SOLO aprobándolo
+  // (gradeQuizAction auto-completa al aprobar). El botón manual es únicamente
+  // para lecciones sin quiz; esto bloquea llamadas directas a la action.
+  const [quizRow] = await db
+    .select({ id: quizzes.id })
+    .from(quizzes)
+    .where(eq(quizzes.lessonId, lessonId))
+    .limit(1);
+  if (quizRow) {
+    const [hasQuestions] = await db
+      .select({ id: questions.id })
+      .from(questions)
+      .where(eq(questions.quizId, quizRow.id))
+      .limit(1);
+    if (hasQuestions) {
+      const [passed] = await db
+        .select({ id: quizAttempts.id })
+        .from(quizAttempts)
+        .where(
+          and(
+            eq(quizAttempts.userId, user.id),
+            eq(quizAttempts.quizId, quizRow.id),
+            eq(quizAttempts.passed, true),
+          ),
+        )
+        .limit(1);
+      if (!passed) {
+        throw new Error(
+          "Esta lección se completa aprobando su quiz (60%+).",
+        );
+      }
+    }
+  }
+
   const result = await db.transaction(async (tx) =>
     processLessonCompletion(tx, {
       userId: user.id,

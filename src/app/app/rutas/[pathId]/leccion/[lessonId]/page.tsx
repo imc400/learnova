@@ -146,16 +146,26 @@ export default async function LessonPage({
         {clientQuestions.length > 0 && detail.quiz && (
           <div className="mt-10">
             <h2 className="font-display text-xl font-semibold">Pon a prueba lo aprendido</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Aprobar el quiz (60%+) completa la lección y suma XP.
+            </p>
             <div className="mt-4">
               <Quiz quizId={detail.quiz.id} questions={clientQuestions} />
             </div>
           </div>
         )}
 
-        {/* Completar — solo cuando el contenido ya existe (XP por dominio real) */}
+        {/* Completar — el quiz ES el camino cuando existe (dominio real, no un
+            botón); el marcado manual queda solo para lecciones sin quiz. */}
         {detail.completed ? (
           <div className="mt-10 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium text-primary">
             <CheckCircle2 className="size-4" /> Lección completada
+          </div>
+        ) : detail.quiz && clientQuestions.length > 0 ? (
+          <div className="mt-10 flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
+            <ListChecks className="size-4 shrink-0" />
+            Esta lección se completa aprobando el quiz de arriba — así tu avance
+            refleja lo que realmente dominas.
           </div>
         ) : content ? (
           <form action={complete} className="mt-10">

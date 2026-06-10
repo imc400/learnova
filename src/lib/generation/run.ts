@@ -209,9 +209,12 @@ export async function runPathGeneration(pathId: string): Promise<void> {
           let digest: VideoDigest | null = null;
           if (topVideo) {
             try {
+              // El contexto de la RUTA viaja al coverage: un video del tema
+              // correcto pero del medio equivocado (DSLR vs celular) puntúa bajo.
+              const coverageSummary = `${ls.summary} (contexto de la ruta: ${skeleton.title})`;
               let ins = await getVideoInsights({
                 videoId: topVideo.videoId,
-                lessonSummary: ls.summary,
+                lessonSummary: coverageSummary,
                 language: intake.language,
                 durationSeconds: topVideo.durationSeconds ?? null,
               });
@@ -221,7 +224,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
               if (ins && ins.digest.coverage < 0.5 && alt) {
                 const altIns = await getVideoInsights({
                   videoId: alt.videoId,
-                  lessonSummary: ls.summary,
+                  lessonSummary: coverageSummary,
                   language: intake.language,
                   durationSeconds: alt.durationSeconds ?? null,
                 });
@@ -434,6 +437,88 @@ async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
       .set({ rank: 1 })
       .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.rank, 99)));
   });
+}
+
+/**
+ * Re-ancla UNA lección ya generada: digest del video (con coverage gate sobre
+ * el candidato #2) → regenera el contenido anclado → regenera el quiz grounded.
+ * Para backfills de rutas generadas sin digest (p.ej. cuota de Gemini agotada).
+ */
+export async function reanchorLesson(lessonId: string): Promise<string> {
+  const [row] = await db
+    .select({
+      lessonTitle: lessonsT.title,
+      moduleTitle: modulesT.title,
+      moduleObjective: modulesT.objective,
+      pathTitle: learningPaths.title,
+      level: learningPaths.level,
+      language: learningPaths.language,
+    })
+    .from(lessonsT)
+    .innerJoin(modulesT, eq(modulesT.id, lessonsT.moduleId))
+    .innerJoin(learningPaths, eq(learningPaths.id, modulesT.pathId))
+    .where(eq(lessonsT.id, lessonId))
+    .limit(1);
+  if (!row) return "lección no encontrada";
+
+  const vids = await db
+    .select()
+    .from(videoCandidates)
+    .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.isActive, true)))
+    .orderBy(videoCandidates.rank)
+    .limit(2);
+  if (!vids.length) return "sin video";
+
+  const summary = `${row.lessonTitle} (contexto de la ruta: ${row.pathTitle})`;
+  let top = vids[0]!;
+  let ins = await getVideoInsights({
+    videoId: top.youtubeVideoId,
+    lessonSummary: summary,
+    language: row.language,
+    durationSeconds: top.durationSeconds ?? null,
+  });
+  const alt = vids[1];
+  if (ins && ins.digest.coverage < 0.5 && alt) {
+    const altIns = await getVideoInsights({
+      videoId: alt.youtubeVideoId,
+      lessonSummary: summary,
+      language: row.language,
+      durationSeconds: alt.durationSeconds ?? null,
+    });
+    if (altIns && altIns.digest.coverage > ins.digest.coverage) {
+      ins = altIns;
+      top = alt;
+      await swapVideoRanks(lessonId, alt.youtubeVideoId).catch(() => {});
+    }
+  }
+  if (!ins) return "digest no disponible";
+
+  const content = await generateLessonContent({
+    pathTitle: row.pathTitle,
+    moduleTitle: row.moduleTitle,
+    moduleObjective: row.moduleObjective ?? "",
+    lessonTitle: row.lessonTitle,
+    lessonSummary: row.lessonTitle,
+    level: row.level,
+    language: row.language,
+    videoDigest: ins.digest,
+  });
+  await db
+    .update(lessonsT)
+    .set({ content, notes: content.keyTakeaways.join("\n• ") })
+    .where(eq(lessonsT.id, lessonId));
+
+  await generateAndSaveQuiz(
+    lessonId,
+    row.lessonTitle,
+    row.lessonTitle,
+    row.level,
+    row.language,
+    content,
+    ins.digest,
+    top.durationSeconds ?? null,
+  );
+  return `anclada (coverage ${ins.digest.coverage.toFixed(2)}, video ${top.youtubeVideoId})`;
 }
 
 /**
