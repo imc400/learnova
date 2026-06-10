@@ -23,6 +23,7 @@
     "@ai-sdk/anthropic": "^3.0.0",
     "@ai-sdk/react": "^3.0.0",
     "@anthropic-ai/sdk": "^0.102.0",
+    "@elevenlabs/react": "^1.6.5",
     "@radix-ui/react-slot": "^1.2.0",
     "@react-email/components": "^1.0.12",
     "@react-email/render": "^2.0.8",

@@ -10,13 +10,19 @@ import {
   Trophy,
   Lock,
   Sparkles,
+  GraduationCap,
 } from "lucide-react";
 import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { moduleRatings } from "@/db/schema";
 import { getPathTree } from "@/server/queries/paths";
+import { startClassAction } from "@/server/actions/live";
+import { SubmitButton } from "@/components/app/submit-button";
 import { GeneratingState } from "@/components/app/generating-state";
+
+/** % de avance que desbloquea la clase en vivo con el profesor IA. */
+const CLASS_UNLOCK_PCT = 40;
 import { RouteProgressLive } from "@/components/app/route-progress-live";
 import { LearningProgress } from "@/components/app/learning-progress";
 import { NextStepCard } from "@/components/app/next-step-card";
@@ -140,6 +146,64 @@ export default async function PathPage({
           moduleTitles={path.modules.map((m) => m.title)}
         />
       )}
+
+      {/* Clase en vivo con el profesor IA: checkpoint de la ruta.
+          Se desbloquea al 40% — el alumno llega con avance real y dudas reales. */}
+      {path.lessonCount > 0 &&
+        (() => {
+          const pct = Math.round((path.completedLessons / path.lessonCount) * 100);
+          const unlocked = pct >= CLASS_UNLOCK_PCT;
+          return (
+            <div
+              className={`mt-6 rounded-xl border p-5 ${
+                unlocked
+                  ? "border-primary/30 bg-primary/5"
+                  : "border-dashed border-border bg-muted/40"
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <span
+                  className={`grid size-10 shrink-0 place-items-center rounded-full border ${
+                    unlocked
+                      ? "border-primary/40 bg-card text-primary"
+                      : "border-border bg-card text-muted-foreground"
+                  }`}
+                >
+                  {unlocked ? (
+                    <GraduationCap className="size-5" />
+                  ) : (
+                    <Lock className="size-4" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Clase en vivo con tu profesor
+                  </p>
+                  {unlocked ? (
+                    <>
+                      <p className="mt-1 text-sm font-medium">
+                        Tu profesor IA conoce tu avance, tus quizzes y tu meta.
+                        Una clase de 25 min por voz para resolver tus dudas y
+                        afianzar lo que viene.
+                      </p>
+                      <form action={startClassAction.bind(null, path.id)} className="mt-3">
+                        <SubmitButton variant="primary" size="sm" pendingText="Preparando tu clase…">
+                          <GraduationCap className="size-4" /> Iniciar clase ahora
+                        </SubmitButton>
+                      </form>
+                    </>
+                  ) : (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Se desbloquea al {CLASS_UNLOCK_PCT}% de avance (vas en{" "}
+                      {pct}%) — así llegas con preguntas reales y la clase vale
+                      oro.
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
       <div className="mt-8 space-y-6">
         {path.modules.map((m, mi) => {

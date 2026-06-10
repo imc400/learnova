@@ -39,6 +39,11 @@ const serverSchema = z.object({
   // --- Google Gemini — digest de videos de YouTube (coherencia ToS-safe) ---
   GEMINI_API_KEY: z.string().min(1).optional(),
 
+  // --- ElevenLabs — clases en vivo con profesor IA ---
+  ELEVENLABS_API_KEY: z.string().min(1).optional(),
+  // Kill-switch de costos: "false" apaga la feature sin deploy.
+  LIVE_CLASSES_ENABLED: z.string().default("true"),
+
   // --- Flow.cl (pagos) — opcional hasta fase de monetización ---
   FLOW_API_KEY: z.string().min(1).optional(),
   FLOW_SECRET_KEY: z.string().min(1).optional(),

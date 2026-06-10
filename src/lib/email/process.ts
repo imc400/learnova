@@ -32,7 +32,13 @@ const TYPE_ALLOW_FIELD: Record<string, keyof typeof emailPreferences.$inferSelec
   weekly_recap: "allowWeeklyRecap",
   reengagement: "allowReengagement",
   welcome: "allowModuleReady", // transaccional suave; respeta unsubscribedAll
+  // class_summary / class_reminder: efectivamente transaccionales (el usuario
+  // tomó/agendó la clase explícitamente) — sin campo de opt-out granular,
+  // solo respetan unsubscribedAll. No se listan aquí a propósito.
 };
+
+/** Tipos exentos del frequency cap: hitos mayores y transaccionales de clase. */
+const CAP_EXEMPT = new Set(["path_completed", "class_summary", "class_reminder"]);
 
 async function skip(outboxId: string, reason: string): Promise<string> {
   await db
@@ -87,6 +93,23 @@ function deterministicContent(
       cta: "Ver mi ruta completa",
     };
   }
+  if (type === "class_summary") {
+    // moduleTitle = nombre del profesor; lessonTitles = resumen + tareas (📝).
+    return {
+      subject: `Tu clase con ${p.moduleTitle ?? "tu profesor"}: resumen y tareas`,
+      intro: `¡Buena clase! Esto fue lo que trabajaron en "${p.pathTitle}" y lo que tu profesor te dejó para seguir avanzando:`,
+      bullets: (p.lessonTitles ?? []).slice(0, 8),
+      cta: "Continuar mi ruta",
+    };
+  }
+  if (type === "class_reminder") {
+    return {
+      subject: `Recordatorio: tu clase de "${p.pathTitle}" se acerca`,
+      intro: `Tu profesor te espera. Entra unos minutos antes y ten a mano tus dudas del módulo.`,
+      bullets: (p.lessonTitles ?? []).slice(0, 4),
+      cta: "Ir a mi ruta",
+    };
+  }
   // module_learned y demás
   return {
     subject: `🏁 Completaste "${p.moduleTitle}"`,
@@ -100,6 +123,8 @@ const BADGES: Partial<Record<OutboxRow["type"], string>> = {
   module_ready: "✨ Nuevo módulo disponible",
   module_learned: "🏁 Módulo completado",
   path_completed: "🏆 Ruta completada",
+  class_summary: "🎙️ Tu clase en vivo",
+  class_reminder: "📅 Clase agendada",
 };
 
 export async function processOutboxEmail(outboxId: string): Promise<string> {
@@ -173,8 +198,8 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
       .select({ n: count() })
       .from(emailLog)
       .where(and(eq(emailLog.userId, row.userId), gte(emailLog.sentAt, weekAgo)));
-    // path_completed es el hito mayor: siempre pasa. El resto respeta el cap.
-    if (row.type !== "path_completed" && Number(sentCount?.n ?? 0) >= prefs.maxPerWeek) {
+    // Hitos mayores y transaccionales de clase siempre pasan; el resto respeta el cap.
+    if (!CAP_EXEMPT.has(row.type) && Number(sentCount?.n ?? 0) >= prefs.maxPerWeek) {
       return skip(outboxId, `frequency cap (${prefs.maxPerWeek}/semana)`);
     }
 
@@ -222,7 +247,12 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
         heading: content.subject.replace(/^([🏁🏆✨🎉]\s*)+/u, ""),
         intro: content.intro,
         bullets: content.bullets,
-        bulletsTitle: row.type === "module_ready" ? "Lo que viene" : "Esto aprendiste",
+        bulletsTitle:
+          row.type === "module_ready"
+            ? "Lo que viene"
+            : row.type === "class_summary"
+              ? "Resumen y tareas"
+              : "Esto aprendiste",
         cta: { label: content.cta, url: ctaUrl },
         secondaryCta:
           row.type === "path_completed" && payload.nextStep
