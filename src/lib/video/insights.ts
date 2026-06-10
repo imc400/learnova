@@ -185,7 +185,12 @@ export async function getVideoInsights(args: {
   }
 
   // 2) Gemini (único provider con entendimiento real; sin fallback que invente).
-  const digest = await fetchGeminiDigest(videoId, lessonSummary, language, durationSeconds);
+  //    Un reintento: el modelo a veces emite JSON con la forma equivocada y la
+  //    segunda pasada suele corregirlo (temperatura baja, mismo prompt).
+  let digest = await fetchGeminiDigest(videoId, lessonSummary, language, durationSeconds);
+  if (!digest) {
+    digest = await fetchGeminiDigest(videoId, lessonSummary, language, durationSeconds);
+  }
   if (!digest) return null;
 
   // 3) Persistir (carrera segura: si otro worker lo insertó, usamos el suyo).
