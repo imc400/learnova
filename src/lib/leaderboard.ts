@@ -44,11 +44,13 @@ function displayNameExpr() {
   )`;
 }
 
-/** Tema de la ruta con actividad más reciente del usuario (solo el topic). */
+/** Tema de la ruta con actividad más reciente del usuario (solo el topic).
+ *  OJO: la referencia externa va calificada ("profiles"."id") — sin calificar,
+ *  Postgres la resuelve contra las tablas internas (ambigua o, peor, errónea). */
 const studyingExpr = sql<string | null>`(
   select lp.topic from ${progress} pr
   join ${learningPaths} lp on lp.id = pr.path_id
-  where pr.user_id = ${profiles.id}
+  where pr.user_id = "profiles"."id"
   order by pr.updated_at desc limit 1
 )`;
 
