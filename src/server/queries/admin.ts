@@ -36,7 +36,8 @@ export async function getAdminKpis(): Promise<AdminKpis> {
       (select count(*) from route_intents) as intents_total,
       (select count(*) from route_intents where status = 'pending_payment') as intents_pending,
       (select count(*) from route_intents where status = 'paid') as intents_paid,
-      (select coalesce(sum(amount_clp), 0) from route_intents where status = 'paid') as revenue_clp
+      -- Libro contable real: rutas pagadas Y meses de Pro manual (kind).
+      (select coalesce(sum(amount), 0) from path_purchases where status = 'paid' and currency = 'CLP') as revenue_clp
   `);
   const n = (k: string) => Number(row?.[k] ?? 0);
   const usersTotal = n("users_total");

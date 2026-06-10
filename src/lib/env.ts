@@ -68,8 +68,9 @@ const serverSchema = z.object({
   PRICE_PRO_CLP: z.coerce.number().int().positive().default(24990),
   PRO_ROUTES_PER_MONTH: z.coerce.number().int().positive().default(2),
   FLOW_PLAN_ID: z.string().default("aulia_pro"),
-  // "true" cuando Flow active el contrato de cobro automático (PAT). Mientras
-  // tanto Pro se muestra como "muy pronto" — ancla el precio sin vender humo.
+  // Modo de cobro de Pro. "true" (requiere PAT activo en Flow): suscripción
+  // real con cobro automático mensual. "false": PRO MANUAL — cobro único de
+  // PRICE_PRO_CLP = 30 días, sin renovación automática (se avisa al cliente).
   PRO_SUBSCRIPTION_ENABLED: z.string().default("false"),
   // Clases en vivo: minutos incluidos POR RUTA (inducción + 40% + cierre)
   // y pool mensual EXTRA de los Pro (pestaña Profesores).

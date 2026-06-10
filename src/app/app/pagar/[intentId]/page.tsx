@@ -85,9 +85,9 @@ export default async function PagarPage({
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
   const pro = env.PRICE_PRO_CLP;
-  // Pro requiere el contrato de cobro automático de Flow (PAT). Hasta que se
-  // active, la card queda como ancla de precio y el pago único es el CTA.
-  const proEnabled = env.PRO_SUBSCRIPTION_ENABLED === "true";
+  // PAT activo → suscripción real con cobro automático. Sin PAT → Pro MANUAL:
+  // cobro único de 30 días, sin renovación automática (se avisa para renovar).
+  const proAutomatico = env.PRO_SUBSCRIPTION_ENABLED === "true";
   const firstName =
     (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ?? null;
 
@@ -113,6 +113,13 @@ export default async function PagarPage({
       {sp.error === "pago" && (
         <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
           No pudimos iniciar el pago. Intenta de nuevo en unos segundos.
+        </p>
+      )}
+      {sp.error === "email" && (
+        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
+          Tu correo no parece recibir mensajes (¿quedó con un error de tipeo?).
+          El procesador de pagos lo verifica para enviarte tu comprobante —
+          corrígelo en tu perfil o escríbenos a hola@aulia.ai.
         </p>
       )}
       {intent.status === "failed" && (
@@ -194,7 +201,7 @@ export default async function PagarPage({
             <SubmitButton
               size="lg"
               className="w-full"
-              variant={proEnabled ? "outline" : "primary"}
+              variant="outline"
               pendingText="Conectando…"
             >
               <ShieldCheck className="size-4" /> Desbloquear mi ruta
@@ -202,10 +209,10 @@ export default async function PagarPage({
           </form>
         </div>
 
-        {/* Pro — Más elegido (o ancla "muy pronto" mientras Flow activa el PAT) */}
+        {/* Pro — Más elegido */}
         <div className="relative flex flex-col rounded-2xl border-2 border-primary bg-card p-5 shadow-lift">
           <span className="absolute -top-3 left-4 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-            {proEnabled ? "🔥 Más elegido" : "✺ Muy pronto"}
+            🔥 Más elegido
           </span>
           <p className="font-display font-semibold">Aulia Pro</p>
           <p className="mt-3 font-display text-3xl font-bold text-primary">
@@ -227,16 +234,14 @@ export default async function PagarPage({
               </li>
             ))}
           </ul>
-          {proEnabled ? (
-            <form action={subscribeProAction} className="mt-4">
-              <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
-                <Sparkles className="size-4" /> Empezar con Pro
-              </SubmitButton>
-            </form>
-          ) : (
-            <p className="mt-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-2.5 text-center text-xs font-medium text-muted-foreground">
-              Estamos abriendo los cupos de Pro. Desbloquea tu ruta hoy y serás
-              de los primeros en enterarte.
+          <form action={subscribeProAction.bind(null, intent.id)} className="mt-4">
+            <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
+              <Sparkles className="size-4" /> Empezar con Pro
+            </SubmitButton>
+          </form>
+          {!proAutomatico && (
+            <p className="mt-2 text-center text-[11px] font-medium text-muted-foreground">
+              Sin cobro automático: pagas 30 días y te avisamos para renovar.
             </p>
           )}
         </div>

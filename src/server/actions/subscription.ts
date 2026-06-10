@@ -3,29 +3,29 @@
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { profiles, subscriptions } from "@/db/schema";
+import { profiles, subscriptions, pathPurchases } from "@/db/schema";
 import { createClient } from "@/lib/supabase/server";
 import {
   createCustomer,
   registerCard,
   cancelSubscription,
+  createPayment,
 } from "@/lib/payments/flow";
 import { env } from "@/lib/env";
 
 /*
-  Suscripción Aulia Pro vía Flow:
-  subscribeProAction → asegura customer → redirige a Flow a registrar la
-  tarjeta → Flow vuelve a /api/flow/card-return → ahí se crea la suscripción
-  (primer cobro automático) → perfil. Cancelación: al final del período.
+  Suscripción Aulia Pro vía Flow — DOS modos según PRO_SUBSCRIPTION_ENABLED:
+
+  "true" (PAT activo): customer → registrar tarjeta → /api/flow/card-return
+  crea la suscripción con cobro automático mensual.
+
+  "false" (PRO MANUAL, mientras Flow activa el PAT): cobro único de
+  PRICE_PRO_CLP = 30 días de Pro completo, SIN cobro automático. La
+  renovación es otra compra igual (el fundador recuerda renovar). El webhook
+  o /api/flow/pro-return confirman vía confirmProMonthPaid.
 */
 
-export async function subscribeProAction() {
-  // Hasta que Flow active el contrato de cobro automático (PAT), Pro no se
-  // vende — guard server-side por si el form llega desde una página cacheada.
-  if (env.PRO_SUBSCRIPTION_ENABLED !== "true") {
-    redirect("/app/planes?error=disponible");
-  }
-
+export async function subscribeProAction(intentId: string | null) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -42,13 +42,27 @@ export async function subscribeProAction() {
     .where(eq(profiles.id, user.id))
     .limit(1);
 
-  // ¿Ya es Pro activo? No cobrar dos veces.
+  // Pro vigente con cobro automático real → jamás cobrar de nuevo. El Pro
+  // MANUAL vigente sí puede volver a pagar: es renovación anticipada y
+  // extiende desde su vencimiento (confirmProMonthPaid).
   const [sub] = await db
     .select()
     .from(subscriptions)
     .where(eq(subscriptions.userId, user.id))
     .limit(1);
-  if (sub?.plan === "pro" && sub.status === "active") redirect("/app/perfil");
+  const vigente =
+    sub?.plan === "pro" &&
+    sub.status === "active" &&
+    (!sub.currentPeriodEnd || sub.currentPeriodEnd.getTime() > Date.now());
+  if (vigente && sub?.providerSubscriptionId) redirect("/app/perfil");
+
+  if (env.PRO_SUBSCRIPTION_ENABLED !== "true") {
+    return startProMonthCheckout({
+      userId: user.id,
+      email: me?.email || user.email!,
+      intentId,
+    });
+  }
 
   let customerId = me?.flowCustomerId ?? null;
   if (!customerId) {
@@ -89,6 +103,55 @@ export async function subscribeProAction() {
       redirect("/app/planes?error=disponible");
     }
     redirect("/app/planes?error=pago");
+  }
+  redirect(redirectUrl);
+}
+
+/** PRO MANUAL: crea la compra pending + pago único en Flow y redirige. */
+async function startProMonthCheckout(args: {
+  userId: string;
+  email: string;
+  intentId: string | null;
+}) {
+  const back = args.intentId ? `/app/pagar/${args.intentId}` : "/app/planes";
+
+  const [purchase] = await db
+    .insert(pathPurchases)
+    .values({
+      userId: args.userId,
+      pathId: null,
+      kind: "pro_month",
+      provider: "flow",
+      amount: env.PRICE_PRO_CLP,
+      currency: "CLP",
+      status: "pending",
+    })
+    .returning({ id: pathPurchases.id });
+  if (!purchase) redirect(`${back}?error=pago`);
+
+  let redirectUrl: string;
+  try {
+    const payment = await createPayment({
+      commerceOrder: `prom_${purchase.id}`,
+      subject: "Aulia Pro — 1 mes (sin cobro automático)",
+      amountCLP: env.PRICE_PRO_CLP,
+      email: args.email,
+      urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,
+      urlReturn: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/pro-return`,
+    });
+    await db
+      .update(pathPurchases)
+      .set({ providerPaymentId: String(payment.flowOrder) })
+      .where(eq(pathPurchases.id, purchase.id));
+    redirectUrl = payment.redirectUrl;
+  } catch (e) {
+    console.error("[pro] pago único Pro falló:", e);
+    // Flow verifica que el buzón EXISTA (error 1620): typo en el correo →
+    // mensaje accionable, no un "algo falló" genérico.
+    if ((e as Error).message?.includes("is not valid")) {
+      redirect(`${back}?error=email`);
+    }
+    redirect(`${back}?error=pago`);
   }
   redirect(redirectUrl);
 }

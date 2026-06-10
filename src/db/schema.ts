@@ -830,7 +830,7 @@ export const subscriptions = pgTable("subscriptions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// Compra única de una ruta ($19)
+// Contabilidad de cobros únicos: rutas Y meses de Pro manual (kind).
 export const pathPurchases = pgTable("path_purchases", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -839,6 +839,8 @@ export const pathPurchases = pgTable("path_purchases", {
   pathId: uuid("path_id").references(() => learningPaths.id, {
     onDelete: "set null",
   }),
+  // route = una ruta · pro_month = 30 días de Pro (cobro único, sin PAT)
+  kind: text("kind").default("route").notNull(),
   provider: paymentProvider("provider").notNull(),
   providerPaymentId: text("provider_payment_id"),
   amount: real("amount").notNull(),

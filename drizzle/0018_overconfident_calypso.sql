@@ -1,0 +1,1 @@
+ALTER TABLE "path_purchases" ADD COLUMN "kind" text DEFAULT 'route' NOT NULL;

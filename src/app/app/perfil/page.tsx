@@ -13,7 +13,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { profiles, subscriptions, pathPurchases, learningPaths } from "@/db/schema";
 import { updatePersonalDataAction } from "@/server/actions/profile";
-import { cancelProAction } from "@/server/actions/subscription";
+import { cancelProAction, subscribeProAction } from "@/server/actions/subscription";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,6 +55,7 @@ export default async function PerfilPage({
         status: pathPurchases.status,
         createdAt: pathPurchases.createdAt,
         pathId: pathPurchases.pathId,
+        kind: pathPurchases.kind,
         pathTitle: learningPaths.title,
       })
       .from(pathPurchases)
@@ -64,7 +65,13 @@ export default async function PerfilPage({
       .limit(20),
   ]);
 
-  const isPro = sub?.plan === "pro" && sub.status === "active";
+  // Vigencia REAL (mismo criterio que getEntitlement, sin la gracia de
+  // reintentos): manual vencido = volver a ofrecer Pro, no fingir actividad.
+  const enPeriodo =
+    !sub?.currentPeriodEnd || sub.currentPeriodEnd.getTime() > Date.now();
+  const isPro = sub?.plan === "pro" && sub.status === "active" && enPeriodo;
+  // Pro manual: cobro único de 30 días, sin suscripción en Flow (sin PAT).
+  const esManual = isPro && !sub?.providerSubscriptionId;
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -136,7 +143,26 @@ export default async function PerfilPage({
         <h2 className="flex items-center gap-2 font-display text-base font-semibold">
           <CreditCard className="size-4 text-primary" /> Tu plan
         </h2>
-        {isPro ? (
+        {isPro && esManual ? (
+          <div className="mt-3">
+            <Badge variant="primary">
+              <Sparkles className="size-3.5" /> Aulia Pro
+            </Badge>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Pro activo hasta el {fmtDate(sub!.currentPeriodEnd)} · sin cobro
+              automático — nadie te cobra sin que tú lo decidas.
+            </p>
+            <form action={subscribeProAction.bind(null, null)} className="mt-3">
+              <SubmitButton size="sm" pendingText="Conectando con Flow…">
+                <Sparkles className="size-4" /> Renovar 30 días más
+              </SubmitButton>
+            </form>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              La renovación se suma a tus días restantes — renovar antes no
+              pierde nada.
+            </p>
+          </div>
+        ) : isPro ? (
           <div className="mt-3 flex items-start justify-between gap-3">
             <div>
               <Badge variant="primary">
@@ -205,7 +231,9 @@ export default async function PerfilPage({
                 <CheckCircle2 className="size-4 shrink-0 text-primary" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">
-                    {p.pathTitle ?? "Ruta de aprendizaje"}
+                    {p.kind === "pro_month"
+                      ? "Aulia Pro — 30 días"
+                      : p.pathTitle ?? "Ruta de aprendizaje"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {fmtDate(p.createdAt)} ·{" "}
