@@ -10,6 +10,7 @@ import {
   profiles,
   homeworkItems,
   learnerProfiles,
+  nextPathSuggestions,
 } from "@/db/schema";
 
 /*
@@ -102,6 +103,24 @@ export async function buildClassBrief(
   const firstName = (prof?.fullName ?? "").trim().split(" ")[0] || "estudiante";
   const doneMods = mods.filter((m) => m.done >= m.total && m.total > 0);
   const currentMod = mods.find((m) => m.done < m.total);
+
+  // Ruta completada → buscar la sugerencia de "Siguiente paso" para que el
+  // profesor la presente en la clase de cierre (upsell pedagógico, no de vendedor).
+  const [nextSuggestion] = !currentMod
+    ? await db
+        .select({
+          topic: nextPathSuggestions.topic,
+          reasons: nextPathSuggestions.reasons,
+        })
+        .from(nextPathSuggestions)
+        .where(
+          and(
+            eq(nextPathSuggestions.sourcePathId, pathId),
+            eq(nextPathSuggestions.userId, userId),
+          ),
+        )
+        .limit(1)
+    : [];
   const failedQuizzes = attempts.filter((a) => !a.passed);
 
   // Errores específicos: pregunta fallada → de qué quiz.
@@ -124,7 +143,10 @@ export async function buildClassBrief(
     `- Avance: ${doneMods.length}/${mods.length} módulos completados${doneMods.length ? ` (${doneMods.map((m) => m.title).join("; ")})` : ""}.`,
     currentMod
       ? `- Módulo actual: "${currentMod.title}" (${currentMod.done}/${currentMod.total} lecciones).`
-      : "- ¡Completó toda la ruta! La clase es de consolidación.",
+      : "- ¡COMPLETÓ TODA LA RUTA! Esta es la CLASE DE CIERRE: celebra su logro con detalles concretos, consolida lo esencial, y al final preséntale con entusiasmo su SIGUIENTE RUTA sugerida (abajo) como tu recomendación pedagógica — dile que la puede crear desde su pantalla al terminar.",
+    nextSuggestion
+      ? `- SIGUIENTE RUTA SUGERIDA (para el cierre): "${nextSuggestion.topic}" — ${nextSuggestion.reasons.slice(0, 2).join("; ")}.`
+      : "",
     concreteErrors.length
       ? `- Trabas detectadas: ${concreteErrors.join("; ")}.`
       : attempts.length

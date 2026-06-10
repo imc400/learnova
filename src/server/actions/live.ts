@@ -14,12 +14,35 @@ import {
 import { revalidatePath } from "next/cache";
 import { env } from "@/lib/env";
 import { getOrCreateRouteAgent } from "@/lib/live/persona";
+import { getEntitlement } from "@/lib/subscription";
 import { createVoiceAgent } from "@/lib/live/provider";
 import type { PathSkeleton } from "@/lib/ai/schemas";
 
-/** Cupo beta (sin pagos): minutos de clase por semana por usuario. */
-const WEEKLY_MINUTES_LIMIT = 30;
 const MAX_CLASS_MINUTES = 30;
+
+/**
+ * Minutos de clase consumidos (completadas/missed por duración real +
+ * in_progress por tiempo transcurrido, cap 30 min).
+ */
+async function usedClassMinutes(
+  userId: string,
+  opts: { pathId?: string; since?: Date },
+): Promise<number> {
+  const conds = [
+    eq(liveSessions.userId, userId),
+    inArray(liveSessions.status, ["completed", "missed", "in_progress"]),
+  ];
+  if (opts.pathId) conds.push(eq(liveSessions.pathId, opts.pathId));
+  if (opts.since) conds.push(gte(liveSessions.createdAt, opts.since));
+  const [used] = await db
+    .select({
+      sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
+      inProgressSec: sql<number>`coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), ${MAX_CLASS_MINUTES * 60})) filter (where ${liveSessions.status} = 'in_progress'), 0)::int`,
+    })
+    .from(liveSessions)
+    .where(and(...conds));
+  return Math.ceil((Number(used?.sec ?? 0) + Number(used?.inProgressSec ?? 0)) / 60);
+}
 
 /**
  * Inicia (o retoma) una clase en vivo para una ruta del usuario.
@@ -103,28 +126,23 @@ export async function startClassAction(
     .limit(1);
   if (open) redirect(`/app/aula/${open.id}`);
 
-  // Cupo semanal en minutos: completadas por duración real + in_progress
-  // recientes por minutos transcurridos (no 30 fijos — una inducción de 10 min
-  // no puede comerse el cupo entero).
-  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
-  const [used] = await db
-    .select({
-      sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
-      inProgressSec: sql<number>`coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), ${MAX_CLASS_MINUTES * 60})) filter (where ${liveSessions.status} = 'in_progress'), 0)::int`,
-    })
-    .from(liveSessions)
-    .where(
-      and(
-        eq(liveSessions.userId, user.id),
-        gte(liveSessions.createdAt, weekAgo),
-        inArray(liveSessions.status, ["completed", "missed", "in_progress"]),
-      ),
-    );
-  const usedMin = Math.ceil(
-    (Number(used?.sec ?? 0) + Number(used?.inProgressSec ?? 0)) / 60,
-  );
-  if (usedMin >= WEEKLY_MINUTES_LIMIT) {
-    redirect(`/app/rutas/${pathId}?clase_error=cupo`);
+  // CUPO DE CLASES (modelo por producto, env-tunable):
+  // - Cada RUTA incluye CLASS_MINUTES_PER_ROUTE min (inducción + clase del
+  //   40% + cierre del 100%).
+  // - Pro además tiene un pool mensual EXTRA (PRO_MONTHLY_CLASS_MINUTES) para
+  //   clases adicionales con cualquiera de sus profesores.
+  // - Básico sin cupo de ruta → upsell (Pro o clase suelta).
+  const routeUsed = await usedClassMinutes(user.id, { pathId });
+  if (routeUsed >= env.CLASS_MINUTES_PER_ROUTE) {
+    const { isPro } = await getEntitlement(user.id);
+    if (!isPro) redirect(`/app/rutas/${pathId}?clase_error=cupo_ruta`);
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthUsed = await usedClassMinutes(user.id, { since: monthStart });
+    if (monthUsed >= env.PRO_MONTHLY_CLASS_MINUTES) {
+      redirect(`/app/rutas/${pathId}?clase_error=cupo_pro`);
+    }
   }
 
   // Persona del profesor (por esqueleto canónico; fallback por ruta).

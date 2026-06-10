@@ -37,6 +37,10 @@ const CLASS_ERRORS: Record<string, string> = {
   desactivadas: "Las clases en vivo están temporalmente desactivadas.",
   induccion_hecha:
     "Tu inducción ya está completa — esa conversación es una sola. Ahora toca avanzar: al 40% de la ruta se desbloquea tu clase particular.",
+  cupo_ruta:
+    "Usaste los minutos de clase incluidos en esta ruta. Con Aulia Pro tienes clases extra cada mes con todos tus profesores →",
+  cupo_pro:
+    "Usaste tus minutos Pro de este mes — se renuevan con tu próximo ciclo. Tu profesor te espera. ✺",
 };
 
 export default async function PathPage({
@@ -274,13 +278,14 @@ export default async function PathPage({
                   {unlocked ? (
                     <>
                       <p className="mt-1 text-sm font-medium">
-                        Tu profesor IA conoce tu avance, tus quizzes y tu meta.
-                        Una clase de 25 min por voz para resolver tus dudas y
-                        afianzar lo que viene.
+                        {pct >= 100
+                          ? "¡Completaste la ruta! Tu profesor quiere cerrar contigo: celebrar lo que lograste, consolidar lo esencial y mostrarte tu siguiente paso."
+                          : "Tu profesor IA conoce tu avance, tus quizzes y tu meta. Una clase de 25 min por voz para resolver tus dudas y afianzar lo que viene."}
                       </p>
                       <form action={startClassAction.bind(null, path.id, "class")} className="mt-3">
                         <SubmitButton variant="primary" size="sm" pendingText="Preparando tu clase…">
-                          <GraduationCap className="size-4" /> Iniciar clase ahora
+                          <GraduationCap className="size-4" />{" "}
+                          {pct >= 100 ? "Clase de cierre con tu profesor" : "Iniciar clase ahora"}
                         </SubmitButton>
                       </form>
                     </>

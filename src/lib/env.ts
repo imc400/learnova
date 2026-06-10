@@ -68,6 +68,12 @@ const serverSchema = z.object({
   PRICE_PRO_CLP: z.coerce.number().int().positive().default(24990),
   PRO_ROUTES_PER_MONTH: z.coerce.number().int().positive().default(2),
   FLOW_PLAN_ID: z.string().default("aulia_pro"),
+  // Clases en vivo: minutos incluidos POR RUTA (inducción + 40% + cierre)
+  // y pool mensual EXTRA de los Pro (pestaña Profesores).
+  CLASS_MINUTES_PER_ROUTE: z.coerce.number().int().positive().default(40),
+  PRO_MONTHLY_CLASS_MINUTES: z.coerce.number().int().positive().default(120),
+  // Clase suelta (upsell del plan por-ruta) — precio fijado por costos.
+  PRICE_CLASS_CLP: z.coerce.number().int().positive().default(6990),
   // Acceso al dashboard admin además de profiles.is_admin (coma-separado).
   ADMIN_EMAILS: z.string().default(""),
 });

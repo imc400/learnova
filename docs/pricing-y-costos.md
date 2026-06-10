@@ -47,12 +47,22 @@ cuota default de 10.000 (uplift solicitado, pendiente).
 1. Lanzar SOLO mensual (sin anual hasta validar churn).
 2. NO prometer "ilimitado" en clases ni rutas personalizadas (rompe el
    margen del peor caso).
-3. ⚠️ PENDIENTE DE DECISIÓN: cuota de clases del comprador one-time — hoy
-   todo usuario tiene 30 min/semana (WEEKLY_MINUTES_LIMIT en
-   src/server/actions/live.ts). Un comprador de $9.990 que use 120 min/mes
-   cuesta ~$15 USD solo en clases → pérdida. Opciones: (a) ruta one-time
-   incluye inducción + 1 clase de 25 min en total, clases semanales solo Pro;
-   (b) mantener mientras se valida (pocos usuarios). HOY rige (b).
+3. ✅ DECIDIDO (2026-06-10): cuota de clases POR PRODUCTO, env-tunable:
+   - Cada RUTA (Básico y Pro) incluye `CLASS_MINUTES_PER_ROUTE` = **40 min**
+     en total: inducción (~10) + clase del 40% (~25) + clase de CIERRE al
+     100% (~10, donde el profesor presenta la siguiente ruta — upsell
+     pedagógico con la sugerencia del brief).
+   - Pro además: `PRO_MONTHLY_CLASS_MINUTES` = **120 min/mes** de clases
+     extra con cualquiera de sus profesores (pestaña /app/profesores).
+   - Básico agotado el cupo → upsell: Pro o clase suelta
+     `PRICE_CLASS_CLP` = **$6.990** (~costo US$3.15 → margen ~55%;
+     checkout de clase suelta = fase 2, precio ya fijado).
+   - Costo de clases peor caso: ruta Básico 40 min = US$5 (margen de la
+     ruta baja a ~14% si el comprador usa TODO — aceptable como producto
+     de adquisición; típico ~50%). Pro todo-al-límite: 2 rutas frescas $8 +
+     80 min por-ruta $10 + 120 min extra $15 = US$33 → mes a pérdida SOLO
+     en el caso extremo absoluto; el uso real esperado (20-40% de cupos)
+     deja margen 55-75%. Ajustar cupos por env si el admin muestra abuso.
 
 ## Arquitectura de suscripción (Flow)
 Plan `aulia_pro` creado en Flow producción ($24.990, mensual, callback
