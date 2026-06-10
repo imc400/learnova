@@ -121,6 +121,7 @@ export default async function AulaPage({
         teacherName={agent.name}
         specialty={agent.specialty}
         pathId={session.pathId}
+        kind={isInduction ? "induction" : "class"}
         outline={outline}
       />
 

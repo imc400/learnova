@@ -28,6 +28,8 @@ interface AulaProps {
   teacherName: string;
   specialty: string;
   pathId: string;
+  /** Tipo de sesión: la inducción tiene cierre propio (popup en la ruta). */
+  kind: "class" | "induction";
   /** Mapa de la ruta para la PIZARRA que el profesor controla en vivo. */
   outline: { title: string; lessons: string[] }[];
 }
@@ -49,6 +51,7 @@ function AulaInner({
   teacherName,
   specialty,
   pathId,
+  kind,
   outline,
 }: AulaProps) {
   const router = useRouter();
@@ -84,9 +87,16 @@ function AulaInner({
         );
       }
     },
-    onDisconnect: () => {
-      // Cierre pedido por el usuario o timer → ritual normal.
-      if (endRequestedRef.current || endedRef.current) {
+    onDisconnect: (details?: { reason?: string }) => {
+      // Cierre pedido por el usuario, el timer, o el PROFESOR (end_call al
+      // despedirse o ante abuso) → ritual normal, jamás reconectar.
+      const reason = details?.reason;
+      if (
+        endRequestedRef.current ||
+        endedRef.current ||
+        reason === "agent" ||
+        reason === "user"
+      ) {
         void finishClass();
         return;
       }
@@ -130,8 +140,10 @@ function AulaInner({
     } catch (e) {
       console.error("[aula] cierre falló:", e);
     }
-    router.push(`/app/rutas/${pathId}?clase=finalizada`);
-  }, [sessionId, pathId, router]);
+    router.push(
+      `/app/rutas/${pathId}?${kind === "induction" ? "induccion" : "clase"}=finalizada`,
+    );
+  }, [sessionId, pathId, kind, router]);
 
   // Conexión al montar (y reconexión ante caídas de WiFi).
   useEffect(() => {

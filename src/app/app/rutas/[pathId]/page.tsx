@@ -15,7 +15,7 @@ import {
 import { and, asc, desc, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { moduleRatings, homeworkItems } from "@/db/schema";
+import { moduleRatings, homeworkItems, liveSessions } from "@/db/schema";
 import { getPathTree } from "@/server/queries/paths";
 import { startClassAction, toggleHomeworkAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
@@ -35,6 +35,8 @@ const CLASS_ERRORS: Record<string, string> = {
   voz: "No pudimos preparar la voz de tu profesor. Intenta de nuevo en unos minutos.",
   revision: "El profesor de esta ruta está en revisión. Intenta más tarde.",
   desactivadas: "Las clases en vivo están temporalmente desactivadas.",
+  induccion_hecha:
+    "Tu inducción ya está completa — esa conversación es una sola. Ahora toca avanzar: al 40% de la ruta se desbloquea tu clase particular.",
 };
 
 export default async function PathPage({
@@ -42,7 +44,7 @@ export default async function PathPage({
   searchParams,
 }: {
   params: Promise<{ pathId: string }>;
-  searchParams: Promise<{ clase?: string; clase_error?: string }>;
+  searchParams: Promise<{ clase?: string; clase_error?: string; induccion?: string }>;
 }) {
   const { pathId } = await params;
   const sp = await searchParams;
@@ -69,6 +71,20 @@ export default async function PathPage({
     .where(and(eq(homeworkItems.userId, user.id), eq(homeworkItems.pathId, pathId)))
     .orderBy(asc(homeworkItems.done), desc(homeworkItems.createdAt))
     .limit(8);
+
+  // ¿La inducción ya se hizo? Es única: hecha una vez, el CTA desaparece.
+  const [inductionDone] = await db
+    .select({ id: liveSessions.id })
+    .from(liveSessions)
+    .where(
+      and(
+        eq(liveSessions.userId, user.id),
+        eq(liveSessions.pathId, pathId),
+        eq(liveSessions.kind, "induction"),
+        eq(liveSessions.status, "completed"),
+      ),
+    )
+    .limit(1);
 
   // Vigilante: una generación de >50 min está muerta (el job marca failed al
   // agotar reintentos, pero si ni eso corrió, la UI no gira para siempre).
@@ -136,6 +152,36 @@ export default async function PathPage({
           ) : null}
         </div>
       </div>
+
+      {/* Post-inducción: la conversación fue única — ahora a la ruta. */}
+      {sp.induccion === "finalizada" && (
+        <div className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-5">
+          <div className="flex items-start gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full border border-primary/40 bg-card text-primary">
+              <GraduationCap className="size-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-display text-base font-bold">
+                ¡Inducción completada! 🎓
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Ya conociste a tu profesor y tu ruta. Te llegará un correo con
+                el resumen de la conversación. Ahora empieza lo bueno: tu
+                primera lección te espera — y al {CLASS_UNLOCK_PCT}% de avance
+                se desbloquea tu clase particular.
+              </p>
+              {path.modules[0]?.lessons[0] && (
+                <Link
+                  href={`/app/rutas/${path.id}/leccion/${path.modules[0].lessons[0].id}`}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <PlayCircle className="size-4" /> Empezar mi primera lección
+                </Link>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Post-clase: celebración con el resumen en camino */}
       {sp.clase === "finalizada" && (
@@ -238,6 +284,15 @@ export default async function PathPage({
                         </SubmitButton>
                       </form>
                     </>
+                  ) : inductionDone ? (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      <span className="font-semibold text-primary">
+                        ✓ Inducción completada.
+                      </span>{" "}
+                      La clase completa se desbloquea al {CLASS_UNLOCK_PCT}% de
+                      avance (vas en {pct}%) — tu profesor te espera con tu
+                      progreso real.
+                    </p>
                   ) : (
                     <>
                       <p className="mt-1 text-sm text-muted-foreground">

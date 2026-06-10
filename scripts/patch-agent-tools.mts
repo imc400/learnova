@@ -4,10 +4,11 @@
   agentes nuevos ya nacen con ellas (createVoiceAgent).
   Uso: npx tsx --env-file=.env scripts/patch-agent-tools.mts
 */
-import { isNotNull } from "drizzle-orm";
+import { eq, isNotNull } from "drizzle-orm";
 import { db } from "../src/db";
-import { routeAgents } from "../src/db/schema";
+import { routeAgents, skeletonCache } from "../src/db/schema";
 import { VOICE_AGENT_TOOLS } from "../src/lib/live/provider";
+import { buildTeacherSystemPrompt } from "../src/lib/live/persona";
 
 const EL_BASE = "https://api.elevenlabs.io/v1";
 const apiKey = process.env.ELEVENLABS_API_KEY;
@@ -20,6 +21,9 @@ const agents = await db
   .select({
     id: routeAgents.id,
     name: routeAgents.name,
+    specialty: routeAgents.specialty,
+    style: routeAgents.style,
+    greeting: routeAgents.greeting,
     cacheKey: routeAgents.cacheKey,
     elId: routeAgents.elevenlabsAgentId,
   })
@@ -45,6 +49,33 @@ for (const a of agents) {
     continue;
   }
   console.log(`✓ ${a.name} (${a.cacheKey}) — ${VOICE_AGENT_TOOLS.length} tools`);
+
+  // El systemPrompt guardado nació ANTES de las reglas nuevas (end_call,
+  // agregar_modulo, idiomas) → se regenera con el builder actual. El idioma
+  // es el último segmento del cacheKey; el título sale del esqueleto canónico.
+  const language = a.cacheKey.split("-").at(-1) ?? "es";
+  const [skel] = await db
+    .select({ skeleton: skeletonCache.skeleton })
+    .from(skeletonCache)
+    .where(eq(skeletonCache.cacheKey, a.cacheKey))
+    .limit(1);
+  const routeTitle =
+    (skel?.skeleton as { title?: string } | null)?.title ?? a.specialty;
+  const systemPrompt = buildTeacherSystemPrompt({
+    persona: {
+      name: a.name,
+      specialty: a.specialty,
+      style: a.style,
+      greeting: a.greeting,
+    },
+    routeTitle,
+    language,
+  });
+  await db
+    .update(routeAgents)
+    .set({ systemPrompt, updatedAt: new Date() })
+    .where(eq(routeAgents.id, a.id));
+  console.log(`  ↻ systemPrompt regenerado (ruta: ${routeTitle})`);
 }
 
 process.exit(0);

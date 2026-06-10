@@ -70,6 +70,24 @@ export async function startClassAction(
       ),
     );
 
+  // La inducción es ÚNICA por ruta: una vez completada, no se repite (el
+  // alumno debe avanzar; su profesor lo espera en la clase del 40%).
+  if (sessionKind === "induction") {
+    const [doneInduction] = await db
+      .select({ id: liveSessions.id })
+      .from(liveSessions)
+      .where(
+        and(
+          eq(liveSessions.userId, user.id),
+          eq(liveSessions.pathId, pathId),
+          eq(liveSessions.kind, "induction"),
+          eq(liveSessions.status, "completed"),
+        ),
+      )
+      .limit(1);
+    if (doneInduction) redirect(`/app/rutas/${pathId}?clase_error=induccion_hecha`);
+  }
+
   // ¿Sesión en curso reciente? Reúsala (refresh del aula, doble clic).
   const [open] = await db
     .select({ id: liveSessions.id })

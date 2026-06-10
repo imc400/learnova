@@ -18,6 +18,14 @@ export const DEFAULT_VOICE_ID = "ClNifCEVq1smkl4M3aTk";
  */
 export const VOICE_AGENT_TOOLS = [
   {
+    // SYSTEM TOOL de ElevenLabs: el agente puede COLGAR la llamada. El
+    // criterio pedagógico (cierre confirmado / abuso) vive en el prompt.
+    type: "system",
+    name: "end_call",
+    description:
+      "Termina la llamada. Úsala SOLO después de despedirte: cuando el alumno confirme que no tiene más dudas, cuando la conversación esté pedagógicamente agotada, o ante mal uso persistente tras 2 redirecciones.",
+  },
+  {
     type: "client",
     name: "mostrar_ruta",
     description:
