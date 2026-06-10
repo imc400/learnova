@@ -327,9 +327,7 @@ function AulaInner({
     {/* PIZARRA — controlada por el profesor con sus herramientas */}
     {boardVisible && (
       <aside className="rounded-2xl border border-primary/30 bg-card p-5 shadow-soft">
-        <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-primary">
-          📋 Pizarra de {teacherName}
-        </p>
+        <p className="hand text-lg">📋 Pizarra de {teacherName}</p>
         <ol className="mt-3 space-y-2">
           {outline.map((m, i) => {
             const focused = focusedModule === i;

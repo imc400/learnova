@@ -60,7 +60,7 @@ export default async function PagarPage({
       <div className="text-center">
         <Badge variant="primary" className="capitalize">{intent.level}</Badge>
         <h1 className="mt-3 font-display text-2xl font-bold tracking-tight">
-          Tu ruta está diseñada. Actívala.
+          Tu ruta está diseñada. <span className="ink-hl">Actívala</span>.
         </h1>
         <p className="mt-2 text-muted-foreground">{intent.goal}</p>
       </div>
@@ -97,13 +97,14 @@ export default async function PagarPage({
         </div>
 
         <form action={startIntentCheckoutAction.bind(null, intent.id)} className="mt-4">
-          <SubmitButton size="lg" className="w-full" pendingText="Conectando con Flow…">
+          <SubmitButton size="lg" className="w-full" pendingText="Conectando con el pago…">
             <ShieldCheck className="size-4" /> Pagar y crear mi ruta
           </SubmitButton>
         </form>
         <p className="mt-3 text-center text-xs text-muted-foreground">
-          Pago seguro vía Flow (tarjetas, transferencia). Tu ruta se empieza a
-          generar apenas se confirma el pago.
+          Pago seguro vía {env.MP_ACCESS_TOKEN ? "Mercado Pago" : "Flow"}{" "}
+          (tarjetas, débito). Tu ruta se empieza a generar apenas se confirma
+          el pago.
         </p>
       </div>
 

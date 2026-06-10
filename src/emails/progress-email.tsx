@@ -13,21 +13,74 @@ import {
 } from "@react-email/components";
 
 /*
-  Plantilla única de correos de avance (Sage & Cream, email-safe inline styles).
+  Plantilla única de correos de avance — tema "Cuaderno" (autodidacta):
+  papel kraft, tinta azul-negra, RESALTADOR amarillo en lo importante y el
+  logo de Aulia (versión email-safe: squircle verde + barras de voz).
   El CONTENIDO (subject/intro/bullets/cta) viene generado por Haiku y
   post-validado; esta plantilla solo da la forma y la marca.
 */
 
 const palette = {
-  paper: "#FAF6EE",
-  ink: "#16261F",
+  paper: "#F1E8D3", // kraft de cuaderno
+  ink: "#23273A", // tinta de lápiz pasta
   green: "#1F7A63",
-  greenDark: "#0E5340",
-  amber: "#F2A65A",
-  muted: "#5C6B63",
-  card: "#FFFFFF",
-  border: "#E6DDCC",
+  greenDark: "#0E5340", // verde del logo (bloqueado)
+  logoAmber: "#F2A65A", // barra ámbar del logo (bloqueada)
+  highlight: "#FCE15C", // resaltador
+  coral: "#D85A3F", // lápiz rojo
+  muted: "#565C71",
+  card: "#FCF9F0", // página
+  border: "#DBCFB3",
 };
+
+/** Logo email-safe: squircle verde con las 4 barras de voz (sin SVG). */
+function EmailLogo() {
+  const bar = (h: number, color: string): React.CSSProperties => ({
+    display: "inline-block",
+    width: 7,
+    height: h,
+    borderRadius: 4,
+    backgroundColor: color,
+    margin: "0 2px",
+    verticalAlign: "middle",
+  });
+  return (
+    <table align="center" role="presentation" cellPadding={0} cellSpacing={0}>
+      <tbody>
+        <tr>
+          <td
+            style={{
+              backgroundColor: palette.greenDark,
+              borderRadius: 18,
+              width: 56,
+              height: 56,
+              textAlign: "center" as const,
+              verticalAlign: "middle",
+            }}
+          >
+            <span style={bar(16, "#FAF6EE")} />
+            <span style={bar(30, palette.logoAmber)} />
+            <span style={bar(22, "#FAF6EE")} />
+            <span style={bar(11, "#FAF6EE")} />
+          </td>
+          <td style={{ paddingLeft: 12 }}>
+            <span
+              style={{
+                fontFamily: "'Fredoka', 'Nunito Sans', Arial, sans-serif",
+                fontSize: 26,
+                fontWeight: 700,
+                color: palette.greenDark,
+                letterSpacing: -0.5,
+              }}
+            >
+              Aulia
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
 
 export interface ProgressEmailProps {
   preview: string;
@@ -60,20 +113,18 @@ export function ProgressEmail({
       <Preview>{preview}</Preview>
       <Body style={{ backgroundColor: palette.paper, margin: 0, padding: "24px 12px", fontFamily: "'Nunito Sans', 'Segoe UI', Arial, sans-serif" }}>
         <Container style={{ maxWidth: 520, margin: "0 auto" }}>
-          {/* Marca */}
-          <Section style={{ textAlign: "center" as const, paddingBottom: 16 }}>
-            <Text style={{ fontSize: 22, fontWeight: 800, color: palette.greenDark, margin: 0, letterSpacing: -0.5 }}>
-              Aulia
-            </Text>
+          {/* Marca (logo bloqueado: verde + ámbar, pase lo que pase) */}
+          <Section style={{ textAlign: "center" as const, paddingBottom: 18 }}>
+            <EmailLogo />
           </Section>
 
           <Section style={{ backgroundColor: palette.card, borderRadius: 16, border: `1px solid ${palette.border}`, padding: "32px 28px" }}>
             {badge && (
-              <Text style={{ display: "inline-block", backgroundColor: "#1F7A6315", color: palette.green, borderRadius: 999, padding: "4px 14px", fontSize: 13, fontWeight: 700, margin: "0 0 14px" }}>
+              <Text style={{ display: "inline-block", backgroundColor: palette.highlight, color: "#5A4A05", borderRadius: 6, padding: "4px 14px", fontSize: 13, fontWeight: 800, margin: "0 0 14px" }}>
                 {badge}
               </Text>
             )}
-            <Heading style={{ color: palette.ink, fontSize: 24, lineHeight: "30px", margin: "0 0 10px", fontWeight: 800 }}>
+            <Heading style={{ color: palette.ink, fontSize: 24, lineHeight: "30px", margin: "0 0 10px", fontWeight: 800, fontFamily: "'Fredoka', 'Nunito Sans', Arial, sans-serif" }}>
               {heading}
             </Heading>
             <Text style={{ color: palette.muted, fontSize: 15, lineHeight: "23px", margin: "0 0 18px" }}>
@@ -81,7 +132,7 @@ export function ProgressEmail({
             </Text>
 
             {bullets.length > 0 && (
-              <Section style={{ backgroundColor: palette.paper, borderRadius: 12, padding: "16px 18px", marginBottom: 20 }}>
+              <Section style={{ backgroundColor: palette.paper, borderRadius: 12, padding: "16px 18px", marginBottom: 20, borderLeft: `3px solid ${palette.highlight}` }}>
                 <Text style={{ color: palette.greenDark, fontSize: 13, fontWeight: 800, textTransform: "uppercase" as const, letterSpacing: 0.6, margin: "0 0 8px" }}>
                   {bulletsTitle}
                 </Text>
@@ -106,7 +157,7 @@ export function ProgressEmail({
 
             <Button
               href={cta.url}
-              style={{ backgroundColor: palette.green, color: "#FFFFFF", borderRadius: 999, padding: "12px 26px", fontSize: 15, fontWeight: 800, textDecoration: "none", display: "inline-block" }}
+              style={{ backgroundColor: palette.greenDark, color: "#FFFFFF", borderRadius: 999, padding: "12px 26px", fontSize: 15, fontWeight: 800, textDecoration: "none", display: "inline-block" }}
             >
               {cta.label}
             </Button>
@@ -121,7 +172,11 @@ export function ProgressEmail({
 
           <Hr style={{ borderColor: palette.border, margin: "24px 0 12px" }} />
           <Text style={{ color: palette.muted, fontSize: 12, lineHeight: "18px", textAlign: "center" as const }}>
-            Recibes este correo porque tienes una cuenta en{" "}
+            De querer aprenderlo a{" "}
+            <span style={{ backgroundColor: palette.highlight, padding: "0 3px", borderRadius: 2, color: palette.ink, fontWeight: 700 }}>
+              saberlo
+            </span>
+            . Recibes este correo porque tienes una cuenta en{" "}
             <Link href="https://aulia.ai" style={{ color: palette.green }}>
               aulia.ai
             </Link>

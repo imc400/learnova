@@ -52,6 +52,9 @@ const serverSchema = z.object({
     .url()
     .default("https://sandbox.flow.cl/api"),
 
+  // --- Mercado Pago (Checkout Pro) — proveedor preferido si está presente ---
+  MP_ACCESS_TOKEN: z.string().min(1).optional(),
+
   // --- Embudo de negocio ---
   // "true" = el wizard exige pago ANTES de generar la ruta (requiere Flow
   // configurado). Apagado: flujo gratuito con límite free de siempre.

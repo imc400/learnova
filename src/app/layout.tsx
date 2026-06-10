@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fredoka, Nunito_Sans } from "next/font/google";
+import { Fredoka, Nunito_Sans, Caveat } from "next/font/google";
 import { site } from "@/lib/site";
 import "./globals.css";
 
@@ -15,6 +15,14 @@ const fredoka = Fredoka({
   subsets: ["latin"],
   variable: "--font-fredoka",
   weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+// Manuscrita (notas al margen del autodidacta): Caveat.
+const caveat = Caveat({
+  subsets: ["latin"],
+  variable: "--font-caveat",
+  weight: ["500", "600", "700"],
   display: "swap",
 });
 
@@ -43,7 +51,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es" className={`${nunito.variable} ${fredoka.variable}`}>
+    <html lang="es" className={`${nunito.variable} ${fredoka.variable} ${caveat.variable}`}>
       <body>{children}</body>
     </html>
   );

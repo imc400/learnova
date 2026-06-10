@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
 /*
-  Sistema de diseño de Aulia — "Sage & Cream".
-  Verde salvia-esmeralda (cálido, humano) sobre papel crema (no blanco clínico),
-  con ámbar/coral como chispa humana. Display: Fredoka · Texto: Nunito Sans.
+  Sistema de diseño de Aulia — tema "Cuaderno" (autodidacta).
+  Papel kraft de cuaderno · tinta azul-negra de lápiz pasta · RESALTADOR
+  amarillo como gesto firma · notas manuscritas (Caveat) al margen.
+  El logo (verde #0E5340 + ámbar #F2A65A) está BLOQUEADO: nunca se tematiza.
+  Display: Fredoka · Texto: Nunito Sans · Manuscrita: Caveat.
 */
 
 @theme inline {
@@ -17,6 +19,8 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-highlight: var(--highlight);
+  --color-highlight-soft: var(--highlight-soft);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -25,6 +29,7 @@
 
   --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-fredoka), var(--font-nunito), ui-sans-serif, sans-serif;
+  --font-hand: var(--font-caveat), cursive;
 
   --radius-sm: 0.625rem; /* 10px */
   --radius-md: 0.875rem; /* 14px */
@@ -36,38 +41,42 @@
 }
 
 :root {
-  --background: #faf6ee; /* paper — crema cálido */
-  --foreground: #16261f; /* ink — verde casi negro */
-  --card: #ffffff;
-  --card-foreground: #16261f;
-  --muted: #f3ecdd; /* paper-2 — crema profundo */
-  --muted-foreground: #4c5c53; /* ink-soft */
-  --primary: #1f7a63; /* verde salvia-esmeralda — firma */
+  --background: #f1e8d3; /* paper — kraft de cuaderno */
+  --foreground: #23273a; /* ink — tinta azul-negra de lápiz pasta */
+  --card: #fcf9f0; /* página off-white cálida */
+  --card-foreground: #23273a;
+  --muted: #e8dcc1; /* kraft profundo — bandas alternas */
+  --muted-foreground: #565c71; /* tinta secundaria */
+  --primary: #1f7a63; /* verde firma de la marca (NO se tematiza) */
   --primary-foreground: #ffffff;
-  --accent: #f2a65a; /* ámbar / sol — chispa humana */
-  --accent-foreground: #16261f;
-  --border: #e6ddcc; /* línea cálida */
-  --input: #e6ddcc;
+  --accent: #f2c53d; /* amarillo resaltador — la chispa del "¡ajá!" */
+  --accent-foreground: #23273a;
+  --highlight: #fce15c; /* trazo de resaltador puro */
+  --highlight-soft: #fbeda4;
+  --border: #dbcfb3; /* línea fina kraft */
+  --input: #dbcfb3;
   --ring: #1f7a63;
-  --destructive: #c0492f; /* terracota-rojo (cálido) */
+  --destructive: #d85a3f; /* lápiz rojo de corrección */
   --destructive-foreground: #ffffff;
 }
 
 .dark {
-  --background: #0f1a15; /* verde-ink profundo */
-  --foreground: #f3ecdd; /* crema */
-  --card: #16261f;
-  --card-foreground: #f3ecdd;
-  --muted: #1c2c24;
-  --muted-foreground: #a7b3aa;
-  --primary: #2e9079; /* salvia más vibrante para fondo oscuro */
+  --background: #1c2236; /* tinta profunda */
+  --foreground: #ece9dd;
+  --card: #23273a;
+  --card-foreground: #ece9dd;
+  --muted: #2a3047;
+  --muted-foreground: #a7abc0;
+  --primary: #2e9079;
   --primary-foreground: #06120d;
-  --accent: #f2a65a;
-  --accent-foreground: #16261f;
-  --border: #243a30;
-  --input: #243a30;
+  --accent: #f2c53d;
+  --accent-foreground: #23273a;
+  --highlight: #fce15c;
+  --highlight-soft: #6b5e1f;
+  --border: #343b57;
+  --input: #343b57;
   --ring: #2e9079;
-  --destructive: #ef4444;
+  --destructive: #e3745a;
   --destructive-foreground: #ffffff;
 }
 
@@ -86,6 +95,22 @@
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     line-height: 1.55;
+    position: relative;
+  }
+  /* grano de papel sutil (gesto del cuaderno) */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(rgb(22 38 31 / 0.018) 1px, transparent 1px);
+    background-size: 4px 4px;
+    opacity: 0.7;
+  }
+  body > * {
+    position: relative;
+    z-index: 1;
   }
   h1,
   h2,
@@ -94,8 +119,10 @@
     font-family: var(--font-display);
     letter-spacing: -0.01em;
   }
+  /* seleccionar texto = pasarle el resaltador */
   ::selection {
-    background-color: color-mix(in oklab, var(--color-primary) 22%, transparent);
+    background-color: var(--highlight);
+    color: #23273a;
   }
 }
 
@@ -105,4 +132,68 @@
   margin-inline: auto;
   max-width: 80rem;
   padding-inline: 1.25rem;
+}
+
+/* ============================================================
+   MOTIVOS AUTODIDACTAS — resaltador · nota al margen · papel
+   ============================================================ */
+
+/* trazo de resaltador detrás de palabras clave */
+@utility ink-hl {
+  background: linear-gradient(
+    180deg,
+    transparent 56%,
+    var(--highlight) 56%,
+    var(--highlight) 92%,
+    transparent 92%
+  );
+  padding: 0 0.12em;
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* nota manuscrita al margen */
+@utility hand {
+  font-family: var(--font-hand);
+  font-weight: 600;
+  color: var(--primary);
+  font-size: 1.32em;
+  line-height: 1.05;
+}
+
+/* textura de papel rayado (cuaderno) */
+@utility ruled {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 33px,
+    color-mix(in srgb, var(--foreground) 9%, transparent) 33px,
+    color-mix(in srgb, var(--foreground) 9%, transparent) 34px
+  );
+}
+
+/* cuadrícula punteada (bullet journal) */
+@utility dotgrid {
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--foreground) 16%, transparent) 1.3px,
+    transparent 1.3px
+  );
+  background-size: 22px 22px;
+}
+
+/* pestaña/ficha adhesiva manuscrita */
+@utility tab-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-hand);
+  font-weight: 700;
+  font-size: 18px;
+  background: var(--highlight);
+  color: #5a4a05;
+  padding: 3px 14px 4px;
+  border-radius: 4px 4px 4px 0;
+  transform: rotate(-2deg);
+  box-shadow: var(--shadow-soft);
 }

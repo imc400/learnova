@@ -52,7 +52,11 @@ export const subStatus = pgEnum("sub_status", [
   "past_due",
   "canceled",
 ]);
-export const paymentProvider = pgEnum("payment_provider", ["flow", "stripe"]);
+export const paymentProvider = pgEnum("payment_provider", [
+  "flow",
+  "stripe",
+  "mercadopago",
+]);
 export const paymentStatus = pgEnum("payment_status", [
   "pending",
   "paid",

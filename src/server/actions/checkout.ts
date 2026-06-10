@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { pathPurchases, learningPaths, routeIntents } from "@/db/schema";
 import { createPayment } from "@/lib/payments/flow";
+import { createPreference } from "@/lib/payments/mercadopago";
 import { env } from "@/lib/env";
 
 /**
@@ -33,19 +34,33 @@ export async function startIntentCheckoutAction(intentId: string) {
   }
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
+  const returnUrl = `${env.NEXT_PUBLIC_SITE_URL}/app/pagar/${intent.id}/retorno`;
   let redirectUrl: string;
   try {
-    const payment = await createPayment({
-      commerceOrder: `intent_${intent.id}`,
-      subject: `Aulia — Ruta: ${intent.topic.slice(0, 60)}`,
-      amountCLP: amount,
-      email: user.email!,
-      urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,
-      urlReturn: `${env.NEXT_PUBLIC_SITE_URL}/app/pagar/${intent.id}/retorno`,
-    });
-    redirectUrl = payment.redirectUrl;
+    if (env.MP_ACCESS_TOKEN) {
+      // Mercado Pago (preferido): Checkout Pro vía external_reference.
+      const pref = await createPreference({
+        externalReference: `intent_${intent.id}`,
+        title: `Aulia — Ruta: ${intent.topic.slice(0, 60)}`,
+        amountCLP: amount,
+        payerEmail: user.email!,
+        returnUrl,
+        notificationUrl: `${env.NEXT_PUBLIC_SITE_URL}/api/mp/webhook`,
+      });
+      redirectUrl = pref.initPoint;
+    } else {
+      const payment = await createPayment({
+        commerceOrder: `intent_${intent.id}`,
+        subject: `Aulia — Ruta: ${intent.topic.slice(0, 60)}`,
+        amountCLP: amount,
+        email: user.email!,
+        urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,
+        urlReturn: returnUrl,
+      });
+      redirectUrl = payment.redirectUrl;
+    }
   } catch (e) {
-    console.error("[checkout] Flow create falló:", e);
+    console.error("[checkout] crear pago falló:", e);
     redirect(`/app/pagar/${intent.id}?error=pago`);
   }
   redirect(redirectUrl);

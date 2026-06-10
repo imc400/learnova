@@ -41,7 +41,13 @@ export default async function CreatePathPage({
           <Sparkles className="size-6" />
         </span>
         <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight">
-          {prefillTopic ? "Tu siguiente ruta" : "¿Qué quieres aprender?"}
+          {prefillTopic ? (
+            "Tu siguiente ruta"
+          ) : (
+            <>
+              ¿Qué quieres <span className="ink-hl">aprender</span>?
+            </>
+          )}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {prefillTopic

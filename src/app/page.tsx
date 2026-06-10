@@ -50,11 +50,15 @@ function Hero() {
           <Badge variant="primary">
             <Sparkles className="size-3.5" /> Aprendizaje adaptativo con IA
           </Badge>
-          <h1 className="mt-5 font-display text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
-            De querer aprenderlo
-            <br />
-            <span className="text-primary">a saberlo.</span>
-          </h1>
+          <div className="relative">
+            <h1 className="mt-5 font-display text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
+              De querer aprenderlo
+              <br />a <span className="ink-hl">saberlo</span>.
+            </h1>
+            <span className="hand absolute -bottom-7 right-4 hidden rotate-[-4deg] sm:inline">
+              lo subrayas tú ✺
+            </span>
+          </div>
           <p className="mt-5 max-w-lg text-lg text-muted-foreground">
             Dinos qué quieres lograr y la IA te arma una{" "}
             <strong className="text-foreground">ruta de aprendizaje a tu medida</strong>:

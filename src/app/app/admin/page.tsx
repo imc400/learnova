@@ -62,9 +62,12 @@ export default async function AdminPage() {
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="font-display text-2xl font-bold tracking-tight">
-        Sala de control
-      </h1>
+      <div className="flex items-center gap-3">
+        <h1 className="font-display text-2xl font-bold tracking-tight">
+          Sala de control
+        </h1>
+        <span className="tab-note">números reales ✺</span>
+      </div>
       <p className="mt-1 text-sm text-muted-foreground">
         Todo lo que pasa en Aulia, en números accionables. Se actualiza en cada carga.
       </p>
