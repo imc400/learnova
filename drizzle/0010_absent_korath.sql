@@ -1,0 +1,1 @@
+ALTER TABLE "lesson_content_cache" ADD COLUMN "video_ids" jsonb;

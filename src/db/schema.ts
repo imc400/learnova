@@ -148,6 +148,10 @@ export const lessonContentCache = pgTable(
     version: integer("version").default(1).notNull(),
     content: jsonb("content").notNull(), // LessonContent (incl. videoGuide canónico)
     quiz: jsonb("quiz"), // GeneratedQuiz (preguntas listas para insertar)
+    // IDs de los videos curados+verificados del canónico (rank asc). En HIT se
+    // re-consultan los metadatos frescos vía videos.list (1 unidad/50) — así la
+    // videoGuide SIEMPRE corresponde al video mostrado y cumplimos los 30 días.
+    videoIds: jsonb("video_ids").$type<string[]>(),
     timesReused: integer("times_reused").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -17,6 +17,7 @@ import {
   generateVideoQueries,
 } from "@/lib/ai/generate";
 import { curateVideoForLesson } from "@/lib/youtube/curate";
+import { getVideoDetails } from "@/lib/youtube/client";
 import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
 import type {
   Intake,
@@ -179,6 +180,8 @@ export async function runPathGeneration(pathId: string): Promise<void> {
     //     lecciones del módulo en paralelo. Cada lección queda lista al instante. ---
     let done = 0;
     let firstModuleEmailSent = false;
+    // Un mismo video de YouTube no se repite entre lecciones de la ruta.
+    const usedVideoIds = new Set<string>();
     const emitProgress = async (step: string) => {
       const pct =
         totalLessons > 0 ? 25 + Math.round((done / totalLessons) * 70) : 25;
@@ -227,6 +230,52 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             .limit(1);
           if (cachedLesson) {
             const cachedContent = cachedLesson.content as LessonContent;
+            // VIDEO FIJADO: el canónico ya pasó el coverage gate y la
+            // videoGuide le pertenece. Re-consultamos metadatos FRESCOS
+            // (videos.list, 1 unidad) para cumplir los 30 días; si el video
+            // murió, recién ahí re-curamos desde cero.
+            const pinVideos = async () => {
+              const ids = (cachedLesson.videoIds as string[] | null) ?? [];
+              if (ids.length) {
+                const fresh = await getVideoDetails(ids);
+                const byId = new Map(fresh.map((f) => [f.videoId, f]));
+                const alive = ids.filter((id) => byId.has(id));
+                if (alive.length && byId.has(ids[0]!)) {
+                  for (const id of alive) usedVideoIds.add(id);
+                  await db
+                    .insert(videoCandidates)
+                    .values(
+                      alive.map((id, rank) => {
+                        const f = byId.get(id)!;
+                        return {
+                          lessonId,
+                          youtubeVideoId: id,
+                          title: f.title,
+                          channelTitle: f.channelTitle,
+                          rank,
+                          language: f.defaultLanguage ?? intake.language,
+                          durationSeconds: f.durationSeconds,
+                          reason: "canónico verificado (cache)",
+                          lastCheckedAt: new Date(),
+                        };
+                      }),
+                    )
+                    .onConflictDoNothing();
+                  return;
+                }
+              }
+              // Sin videos fijados o el principal murió → curación normal.
+              const vids = await curateAndSaveVideo(
+                lessonId,
+                queryByIndex.get(li) ?? ls.title,
+                m.objective,
+                intake.language,
+                skeleton.title,
+                usedVideoIds,
+              );
+              for (const v of vids) usedVideoIds.add(v.videoId);
+            };
+
             await Promise.all([
               db
                 .update(lessonsT)
@@ -235,12 +284,8 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                   notes: cachedContent.keyTakeaways.join("\n• "),
                 })
                 .where(eq(lessonsT.id, lessonId)),
-              // Videos para la página (búsquedas ya cacheadas → barato).
-              curateAndSaveVideo(
-                lessonId,
-                queryByIndex.get(li) ?? ls.title,
-                m.objective,
-                intake.language,
+              pinVideos().catch((e) =>
+                console.error(`[generation] pin de video falló:`, e),
               ),
               cachedLesson.quiz
                 ? saveQuizData(lessonId, ls.title, cachedLesson.quiz as GeneratedQuizData).catch(
@@ -262,7 +307,15 @@ export async function runPathGeneration(pathId: string): Promise<void> {
 
           // STAGE B — curar video + digest del top-1 (con coverage gate).
           const query = queryByIndex.get(li) ?? ls.title;
-          const vids = await curateAndSaveVideo(lessonId, query, m.objective, intake.language);
+          const vids = await curateAndSaveVideo(
+            lessonId,
+            query,
+            m.objective,
+            intake.language,
+            skeleton.title,
+            usedVideoIds,
+          );
+          for (const v of vids) usedVideoIds.add(v.videoId);
           let topVideo = vids[0] ?? null;
           let digest: VideoDigest | null = null;
           if (topVideo) {
@@ -293,6 +346,23 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                     console.error(`[generation] swap de rank falló:`, e),
                   );
                 }
+              }
+              // PISO DE COVERAGE: si ni el mejor candidato trata de lo que la
+              // lección necesita, mejor SIN video principal que uno irrelevante
+              // (caso real: video de ansiedad en ruta de fotografía).
+              if (ins && ins.digest.coverage < 0.35) {
+                await db
+                  .update(videoCandidates)
+                  .set({ isActive: false })
+                  .where(
+                    and(
+                      eq(videoCandidates.lessonId, lessonId),
+                      eq(videoCandidates.youtubeVideoId, topVideo.videoId),
+                    ),
+                  )
+                  .catch(() => {});
+                topVideo = null;
+                ins = null;
               }
               digest = ins?.digest ?? null;
             } catch (e) {
@@ -333,6 +403,10 @@ export async function runPathGeneration(pathId: string): Promise<void> {
 
           // Cachear el canónico: los siguientes usuarios del esqueleto reciben
           // esta lección (y su quiz) gratis y al instante.
+          // Orden final de videos: el verificado por coverage primero.
+          const finalVideoIds = topVideo
+            ? [topVideo.videoId, ...vids.filter((v) => v.videoId !== topVideo!.videoId).map((v) => v.videoId)]
+            : vids.map((v) => v.videoId);
           await db
             .insert(lessonContentCache)
             .values({
@@ -341,6 +415,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
               lessonIndex: li,
               content,
               quiz: quizData,
+              videoIds: finalVideoIds,
             })
             .onConflictDoNothing({
               target: [
@@ -478,9 +553,17 @@ async function curateAndSaveVideo(
   query: string,
   objective: string,
   language: string,
+  routeTopic?: string,
+  excludeVideoIds?: Set<string>,
 ): Promise<Awaited<ReturnType<typeof curateVideoForLesson>>> {
   try {
-    const vids = await curateVideoForLesson({ query, objective, language });
+    const vids = await curateVideoForLesson({
+      query,
+      objective,
+      language,
+      routeTopic,
+      excludeVideoIds,
+    });
     if (vids.length) {
       await db
         .insert(videoCandidates)

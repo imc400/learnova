@@ -63,6 +63,10 @@ export async function curateVideoForLesson(args: {
   query: string;
   objective: string;
   language: string;
+  /** Tema de la RUTA — la relevancia temática manda sobre el idioma. */
+  routeTopic?: string;
+  /** Videos ya usados en la ruta (no repetir el mismo video entre lecciones). */
+  excludeVideoIds?: Set<string>;
   keep?: number; // cuántos guardar (principal + alternativas)
 }): Promise<CuratedVideo[]> {
   const keep = args.keep ?? 3;
@@ -91,22 +95,28 @@ export async function curateVideoForLesson(args: {
     ids = await cachedSearchIds(args.query, args.language, true);
     allCandidates = await getVideoDetails(ids);
   }
+  // No repetir videos ya usados en otras lecciones de la misma ruta.
+  if (args.excludeVideoIds?.size) {
+    allCandidates = allCandidates.filter(
+      (c) => !args.excludeVideoIds!.has(c.videoId),
+    );
+  }
   if (allCandidates.length === 0) return [];
 
-  // --- FILTRO DURO DE IDIOMA ---
-  // defaultLanguage = idioma de AUDIO real reportado por YouTube. Si existen
-  // videos en el idioma del estudiante, descartamos los de otro idioma. Si
-  // NINGUNO coincide (nicho sin contenido en ese idioma), caemos al mejor
-  // disponible y el reproductor mostrará subtítulos traducidos + un aviso.
+  // --- FILTRO DE IDIOMA (suave cuando hay pocos candidatos) ---
+  // defaultLanguage = idioma de AUDIO real. Preferimos el idioma del
+  // estudiante, PERO la relevancia temática la decide el ranker: si solo hay
+  // 1-2 "matches" de idioma, pasamos TODOS los candidatos para que un video
+  // del tema correcto en otro idioma le gane a uno irrelevante en español
+  // (caso real: video de ansiedad ganándole a tutoriales de fotografía).
   const langOf = (c: (typeof allCandidates)[number]) =>
     (c.defaultLanguage || "").slice(0, 2).toLowerCase();
   const matched = allCandidates.filter((c) => langOf(c) === target);
   const unknown = allCandidates.filter((c) => !c.defaultLanguage);
-  const byLanguage = matched.length
-    ? [...matched, ...unknown] // hay en el idioma → excluye los de otro idioma
-    : unknown.length
-      ? unknown // sin confirmados, pero hay sin etiqueta → dales la oportunidad
-      : allCandidates; // todo en otro idioma → fallback subtitulado
+  const byLanguage =
+    matched.length >= 3
+      ? [...matched, ...unknown] // idioma abundante → excluye otros idiomas
+      : allCandidates; // escasez → el ranker decide con relevancia primero
 
   // --- FILTRO DURO DE DURACIÓN (anti-Shorts) ---
   // Un Short no sostiene una lección: exige un mínimo real de contenido.
@@ -127,6 +137,7 @@ export async function curateVideoForLesson(args: {
       {
         role: "user",
         content: [
+          args.routeTopic ? `TEMA DE LA RUTA: ${args.routeTopic}` : "",
           `OBJETIVO DEL PASO: ${args.objective}`,
           `IDIOMA DEL ESTUDIANTE: ${args.language}`,
           "",
