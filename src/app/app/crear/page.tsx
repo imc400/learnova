@@ -55,6 +55,11 @@ export default async function CreatePathPage({
           Revisa el tema y la meta: necesitamos un poco más de detalle.
         </p>
       )}
+      {sp.error === "telefono" && (
+        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
+          Revisa tu WhatsApp: debe tener entre 8 y 15 dígitos (ej: +56 9 1234 5678).
+        </p>
+      )}
 
       <CreateWizard
         defaultLanguage={defaultLang}

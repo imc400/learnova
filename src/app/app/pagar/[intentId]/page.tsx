@@ -49,7 +49,9 @@ export default async function PagarPage({
     .limit(1);
   if (!intent) notFound();
   if (intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
-  if (intent.status !== "pending_payment") redirect("/app/crear");
+  if (intent.status !== "pending_payment" && intent.status !== "failed") {
+    redirect("/app/crear");
+  }
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
 
@@ -66,6 +68,12 @@ export default async function PagarPage({
       {sp.error === "pago" && (
         <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
           No pudimos iniciar el pago. Intenta de nuevo en unos segundos.
+        </p>
+      )}
+      {intent.status === "failed" && (
+        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-center text-sm font-medium">
+          Tu pago anterior no se concretó (rechazado o anulado). Puedes
+          intentarlo de nuevo cuando quieras — tu ruta sigue reservada.
         </p>
       )}
 

@@ -106,12 +106,21 @@ export interface DayCount {
 
 /** Registros y rutas por día (últimos 14 días, incluye días en cero). */
 export async function getDailySeries(): Promise<DayCount[]> {
+  // Días en hora de CHILE (created_at es UTC; sin conversión, lo de la noche
+  // cae al día siguiente y los gráficos mienten).
   const rows = await db.execute<Record<string, unknown>>(sql`
+    with hoy as (select (now() at time zone 'America/Santiago')::date as d)
     select
       d.day::date as day,
-      (select count(*) from profiles p where p.created_at::date = d.day) as signups,
-      (select count(*) from learning_paths lp where lp.created_at::date = d.day) as paths
-    from generate_series(current_date - interval '13 days', current_date, '1 day') as d(day)
+      (select count(*) from profiles p
+        where (p.created_at at time zone 'America/Santiago')::date = d.day) as signups,
+      (select count(*) from learning_paths lp
+        where (lp.created_at at time zone 'America/Santiago')::date = d.day) as paths
+    from generate_series(
+      (select d from hoy) - interval '13 days',
+      (select d from hoy),
+      '1 day'
+    ) as d(day)
     order by d.day
   `);
   return rows.map((r) => ({

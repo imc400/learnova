@@ -107,7 +107,8 @@ export function CreateWizard({
     [questions, answers],
   );
 
-  const phoneValid = /^\+?[\d\s().-]{8,20}$/.test(phone.trim());
+  // Misma regla que el servidor (normalizePhone): + opcional y 8-15 dígitos.
+  const phoneValid = /^\+?\d{8,15}$/.test(phone.trim().replace(/[\s().-]/g, ""));
 
   const submit = () => {
     setError(null);

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import {
   pathPurchases,
@@ -19,13 +19,34 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const token = String(form.get("token") ?? "");
-    if (!token) return NextResponse.json({ ok: false }, { status: 400 });
+    // Solo formatos de token plausibles llegan a Flow (anti banging del endpoint).
+    if (!/^[\w-]{8,128}$/.test(token)) {
+      return NextResponse.json({ ok: false }, { status: 400 });
+    }
 
+    // La verdad SIEMPRE se consulta a Flow con petición firmada (HMAC con
+    // nuestra secret) — jamás se confía en el body del webhook.
     const status = await getPaymentStatus(token);
+    const order = status.commerceOrder;
+
+    // status 3 (rechazado) / 4 (anulado) → el intent queda 'failed' para que
+    // el usuario vea qué pasó y pueda reintentar (jamás un limbo silencioso).
+    if ((status.status === 3 || status.status === 4) && order.startsWith("intent_")) {
+      await db
+        .update(routeIntents)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(
+          and(
+            eq(routeIntents.id, order.slice(7)),
+            eq(routeIntents.status, "pending_payment"),
+          ),
+        )
+        .catch((e) => console.error("[flow webhook] marcar failed:", e));
+      return NextResponse.json({ ok: true });
+    }
 
     // status === 2 → pagado
     if (status.status === 2) {
-      const order = status.commerceOrder;
 
       if (order.startsWith("intent_")) {
         // PAYWALL PRE-GENERACIÓN. Transacción con lock de fila: Flow reenvía
@@ -40,7 +61,9 @@ export async function POST(req: Request) {
             .where(eq(routeIntents.id, intentId))
             .for("update");
           if (!intent || intent.pathId) return null; // ya procesado
-          if (intent.status !== "pending_payment" && intent.status !== "paid") {
+          // Claimables: pendiente, pagado-sin-ruta (reintento tras fallo de
+          // creación) y failed (el usuario reintentó el pago y ahora SÍ pagó).
+          if (!["pending_payment", "paid", "failed"].includes(intent.status)) {
             return null;
           }
           const [path] = await tx
@@ -75,19 +98,40 @@ export async function POST(req: Request) {
 
         if (result) {
           // Fuera de la transacción: side-effects no transaccionales.
-          await enqueuePathGeneration(result.pathId).catch((e) =>
+          // La generación se reintenta aquí mismo (sin ella, ruta huérfana).
+          let enqueued = false;
+          for (let i = 0; i < 3 && !enqueued; i++) {
+            try {
+              await enqueuePathGeneration(result.pathId);
+              enqueued = true;
+            } catch (e) {
+              console.error(
+                `[flow webhook] enqueue intento ${i + 1}/3 falló (ruta ${result.pathId}):`,
+                e,
+              );
+              await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+            }
+          }
+          if (!enqueued) {
             console.error(
-              `[flow webhook] CRÍTICO: ruta ${result.pathId} creada pero generación no encolada:`,
-              e,
-            ),
-          );
+              `[flow webhook] CRÍTICO: ruta ${result.pathId} pagada SIN generación encolada — intervenir manualmente`,
+            );
+          }
+          // Contabilidad: el monto REAL cobrado por Flow es la verdad; si
+          // difiere del intent, queda alerta (jamás divergencia silenciosa).
+          const flowAmount = Number(status.amount) || 0;
+          if (result.intent.amountClp && flowAmount && flowAmount !== result.intent.amountClp) {
+            console.error(
+              `[flow webhook] ALERTA: monto Flow ${flowAmount} ≠ intent ${result.intent.amountClp} (intent ${intentId})`,
+            );
+          }
           await db
             .insert(pathPurchases)
             .values({
               userId: result.intent.userId,
               pathId: result.pathId,
               provider: "flow",
-              amount: result.intent.amountClp ?? (Number(status.amount) || 0),
+              amount: flowAmount || result.intent.amountClp || 0,
               currency: "CLP",
               status: "paid",
             })

@@ -5,6 +5,7 @@ import { Loader2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { routeIntents } from "@/db/schema";
+import { AutoRefresh } from "@/components/app/auto-refresh";
 
 export const metadata = { title: "Confirmando tu pago" };
 // El estado cambia vía webhook: esta página SIEMPRE consulta fresco.
@@ -46,8 +47,7 @@ export default async function RetornoPage({
           Flow nos confirma en segundos. Apenas llegue, tu ruta se empieza a
           generar sola — esta página se actualiza automáticamente.
         </p>
-        {/* Polling simple sin JS custom: refresh cada 4 s */}
-        <meta httpEquiv="refresh" content="4" />
+        <AutoRefresh seconds={4} />
         <p className="mt-6 text-xs text-muted-foreground">
           ¿No pagaste todavía?{" "}
           <Link href={`/app/pagar/${intentId}`} className="font-medium text-primary hover:underline">
@@ -66,7 +66,27 @@ export default async function RetornoPage({
         <h1 className="mt-4 font-display text-xl font-semibold">
           ¡Pago confirmado! Preparando tu ruta…
         </h1>
-        <meta httpEquiv="refresh" content="3" />
+        <AutoRefresh seconds={3} />
+      </div>
+    );
+  }
+
+  if (intent.status === "failed") {
+    return (
+      <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-8 text-center">
+        <AlertTriangle className="mx-auto size-8 text-accent-foreground" />
+        <h1 className="mt-4 font-display text-xl font-semibold">
+          El pago no se concretó
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Fue rechazado o anulado — nada se cobró. Tu ruta sigue reservada.
+        </p>
+        <Link
+          href={`/app/pagar/${intentId}`}
+          className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90"
+        >
+          Reintentar el pago
+        </Link>
       </div>
     );
   }

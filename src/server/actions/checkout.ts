@@ -26,8 +26,11 @@ export async function startIntentCheckoutAction(intentId: string) {
     .where(and(eq(routeIntents.id, intentId), eq(routeIntents.userId, user.id)))
     .limit(1);
   if (!intent) redirect("/app/crear");
-  if (intent.status === "paid" && intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
-  if (intent.status !== "pending_payment") redirect("/app");
+  if (intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
+  // failed = pago rechazado/anulado → se puede reintentar.
+  if (intent.status !== "pending_payment" && intent.status !== "failed") {
+    redirect("/app");
+  }
 
   const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
   let redirectUrl: string;
