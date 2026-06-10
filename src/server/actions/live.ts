@@ -10,6 +10,10 @@ import {
   routeAgents,
   skeletonCache,
   homeworkItems,
+  profiles,
+  progress,
+  lessons,
+  modules,
 } from "@/db/schema";
 import { revalidatePath } from "next/cache";
 import { env } from "@/lib/env";
@@ -126,21 +130,41 @@ export async function startClassAction(
     .limit(1);
   if (open) redirect(`/app/aula/${open.id}`);
 
-  // CUPO DE CLASES (modelo por producto, env-tunable):
-  // - Cada RUTA incluye CLASS_MINUTES_PER_ROUTE min (inducción + clase del
-  //   40% + cierre del 100%).
-  // - Pro además tiene un pool mensual EXTRA (PRO_MONTHLY_CLASS_MINUTES) para
-  //   clases adicionales con cualquiera de sus profesores.
-  // - Básico sin cupo de ruta → upsell (Pro o clase suelta).
+  // REGLAS DE CLASES (server-side — la UI solo refleja, jamás decide):
+  // BÁSICO: clases SOLO dentro del viaje de su ruta — inducción al inicio,
+  //   clase completa desde el 40% de avance, cierre al 100% — y dentro del
+  //   cupo CLASS_MINUTES_PER_ROUTE por ruta.
+  // PRO: además del viaje, clases libres con cualquiera de sus profesores
+  //   contra su pool mensual (PRO_MONTHLY_CLASS_MINUTES).
+  const { isPro } = await getEntitlement(user.id);
+  const [me] = await db
+    .select({ isAdmin: profiles.isAdmin })
+    .from(profiles)
+    .where(eq(profiles.id, user.id))
+    .limit(1);
+  const privileged = isPro || !!me?.isAdmin;
+
+  // Gate pedagógico del 40% (antes vivía solo en la UI — saltable).
+  if (sessionKind === "class" && !privileged) {
+    const [prog] = await db
+      .select({
+        done: sql<number>`count(*) filter (where ${progress.status} = 'completed')::int`,
+        total: sql<number>`(select count(*) from ${lessons} l join ${modules} m on m.id = l.module_id where m.path_id = ${pathId})::int`,
+      })
+      .from(progress)
+      .where(and(eq(progress.userId, user.id), eq(progress.pathId, pathId)));
+    const pct = prog?.total ? (Number(prog.done) / Number(prog.total)) * 100 : 0;
+    if (pct < 40) redirect(`/app/rutas/${pathId}?clase_error=avance`);
+  }
+
   const routeUsed = await usedClassMinutes(user.id, { pathId });
   if (routeUsed >= env.CLASS_MINUTES_PER_ROUTE) {
-    const { isPro } = await getEntitlement(user.id);
-    if (!isPro) redirect(`/app/rutas/${pathId}?clase_error=cupo_ruta`);
+    if (!privileged) redirect(`/app/rutas/${pathId}?clase_error=cupo_ruta`);
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
     const monthUsed = await usedClassMinutes(user.id, { since: monthStart });
-    if (monthUsed >= env.PRO_MONTHLY_CLASS_MINUTES) {
+    if (monthUsed >= env.PRO_MONTHLY_CLASS_MINUTES && !me?.isAdmin) {
       redirect(`/app/rutas/${pathId}?clase_error=cupo_pro`);
     }
   }

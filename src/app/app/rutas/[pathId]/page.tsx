@@ -39,6 +39,8 @@ const CLASS_ERRORS: Record<string, string> = {
     "Tu inducción ya está completa — esa conversación es una sola. Ahora toca avanzar: al 40% de la ruta se desbloquea tu clase particular.",
   cupo_ruta:
     "Usaste los minutos de clase incluidos en esta ruta. Con Aulia Pro tienes clases extra cada mes con todos tus profesores →",
+  avance:
+    "Tu clase completa se desbloquea al 40% de avance — así llegas con preguntas reales y la clase vale oro. Con Aulia Pro puedes hablar con tus profesores cuando quieras.",
   cupo_pro:
     "Usaste tus minutos Pro de este mes — se renuevan con tu próximo ciclo. Tu profesor te espera. ✺",
 };

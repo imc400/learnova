@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getEntitlement } from "@/lib/subscription";
 import { listUserPaths } from "@/server/queries/paths";
 import { getUserAchievements } from "@/server/queries/gamification";
 import { LearningProgress } from "@/components/app/learning-progress";
@@ -53,6 +54,7 @@ export default async function DashboardPage() {
   const [paths, achievements] = user
     ? await Promise.all([listUserPaths(user.id), getUserAchievements(user.id)])
     : [[], []];
+  const { isPro } = user ? await getEntitlement(user.id) : { isPro: false };
 
   // "Caminos": cadenas de rutas conectadas por linaje (sourcePathId — la ruta
   // creada desde el "Siguiente paso" de otra). Un camino = raíz + sucesoras.
@@ -106,6 +108,25 @@ export default async function DashboardPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Estímulo Pro: visible para básicos con al menos una ruta (los que
+          ya probaron el producto — el mejor momento para el upgrade). */}
+      {!isPro && paths.length > 0 && (
+        <div className="flex flex-col items-start justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center">
+          <div>
+            <p className="font-display text-sm font-bold">
+              🔥 ¿Vas en serio? Aulia Pro
+            </p>
+            <p className="text-sm text-muted-foreground">
+              2 rutas nuevas al mes + clases en vivo con todos tus profesores
+              cuando quieras.
+            </p>
+          </div>
+          <Button asChild size="sm" variant="primary">
+            <Link href="/app/planes">Conocer Pro</Link>
+          </Button>
+        </div>
+      )}
 
       {paths.length === 0 ? (
         <div className="grid place-items-center rounded-xl border border-dashed border-border bg-card py-20 text-center">

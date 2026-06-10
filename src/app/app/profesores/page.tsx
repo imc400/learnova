@@ -1,10 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { GraduationCap, Mic, Sparkles, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { learningPaths, routeAgents, liveSessions } from "@/db/schema";
+import {
+  learningPaths,
+  routeAgents,
+  liveSessions,
+  progress,
+  modules,
+  lessons,
+} from "@/db/schema";
 import { getEntitlement } from "@/lib/subscription";
 import { startClassAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
@@ -69,6 +76,34 @@ export default async function ProfesoresPage() {
     : [];
   const usedByPath = new Map(usage.map((u) => [u.pathId, Number(u.min)]));
 
+  // Avance por ruta (la clase del viaje se desbloquea al 40% — misma regla
+  // que aplica el servidor en startClassAction).
+  const prog = pathIds.length
+    ? await db
+        .select({
+          pathId: progress.pathId,
+          done: sql<number>`count(*) filter (where ${progress.status} = 'completed')::int`,
+        })
+        .from(progress)
+        .where(
+          and(eq(progress.userId, user.id), inArray(progress.pathId, pathIds)),
+        )
+        .groupBy(progress.pathId)
+    : [];
+  const doneByPath = new Map(prog.map((r) => [r.pathId, Number(r.done)]));
+  const totals = pathIds.length
+    ? await db
+        .select({
+          pathId: modules.pathId,
+          total: sql<number>`count(${lessons.id})::int`,
+        })
+        .from(modules)
+        .innerJoin(lessons, sql`${lessons.moduleId} = ${modules.id}`)
+        .where(inArray(modules.pathId, pathIds))
+        .groupBy(modules.pathId)
+    : [];
+  const totalByPath = new Map(totals.map((r) => [r.pathId, Number(r.total)]));
+
   const { isPro } = await getEntitlement(user.id);
   const monthStart = new Date();
   monthStart.setDate(1);
@@ -126,7 +161,13 @@ export default async function ProfesoresPage() {
             const agent = agentByKey.get(p.cacheKey ?? `path-${p.id}`);
             const used = usedByPath.get(p.id) ?? 0;
             const routeLeft = Math.max(0, env.CLASS_MINUTES_PER_ROUTE - used);
-            const canClass = routeLeft > 0 || (isPro && proMonthLeft > 0);
+            const total = totalByPath.get(p.id) ?? 0;
+            const pct = total > 0 ? Math.round(((doneByPath.get(p.id) ?? 0) / total) * 100) : 0;
+            // BÁSICO: solo la clase del VIAJE (≥40% de avance) y con cupo de
+            // ruta. PRO: libre mientras tenga minutos (ruta o pool mensual).
+            const canClass = isPro
+              ? routeLeft > 0 || proMonthLeft > 0
+              : pct >= 40 && routeLeft > 0;
             return (
               <div key={p.id} className="rounded-xl border border-border bg-card p-5">
                 <div className="flex items-start gap-3">
@@ -143,31 +184,35 @@ export default async function ProfesoresPage() {
                   </div>
                 </div>
                 <p className="mt-3 line-clamp-2 text-xs text-muted-foreground">
-                  Ruta: {p.title}
-                </p>
-                <p className="mt-2 text-xs tabular-nums text-muted-foreground">
-                  {routeLeft > 0
-                    ? `${routeLeft} min de clase disponibles en esta ruta`
-                    : isPro && proMonthLeft > 0
-                      ? "Cupo de la ruta usado — corre por tu pool Pro"
-                      : "Cupo de clases de esta ruta completo"}
+                  Ruta: {p.title} · {pct}% completada
                 </p>
                 {canClass ? (
-                  <form action={startClassAction.bind(null, p.id, "class")} className="mt-3">
-                    <SubmitButton size="sm" className="w-full" pendingText="Preparando…">
-                      <Mic className="size-4" /> Clase en vivo
-                    </SubmitButton>
-                  </form>
+                  <>
+                    <p className="mt-2 text-xs tabular-nums text-muted-foreground">
+                      {routeLeft > 0
+                        ? `${routeLeft} min de clase disponibles en esta ruta`
+                        : "Corre por tu pool Pro mensual"}
+                    </p>
+                    <form action={startClassAction.bind(null, p.id, "class")} className="mt-3">
+                      <SubmitButton size="sm" className="w-full" pendingText="Preparando…">
+                        <Mic className="size-4" /> Clase en vivo
+                      </SubmitButton>
+                    </form>
+                  </>
                 ) : (
                   <div className="mt-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-center">
                     <p className="flex items-center justify-center gap-1.5 text-xs font-medium">
-                      <Lock className="size-3.5" /> Más clases con tu profesor:
+                      <Lock className="size-3.5" />
+                      {!isPro && pct < 40
+                        ? `Tu clase del viaje se desbloquea al 40% (vas en ${pct}%)`
+                        : "Más clases con tu profesor:"}
                     </p>
                     <Link
                       href="/app/planes"
                       className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90"
                     >
-                      <Sparkles className="size-3.5" /> Hacerme Pro
+                      <Sparkles className="size-3.5" /> Pro: {env.PRO_MONTHLY_CLASS_MINUTES} min/mes
+                      con todos tus profes
                     </Link>
                     <p className="mt-1.5 text-[11px] text-muted-foreground">
                       o clase suelta ${env.PRICE_CLASS_CLP.toLocaleString("es-CL")} — muy pronto
