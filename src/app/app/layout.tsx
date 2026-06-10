@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { LogOut, LayoutGrid, Plus, Users } from "lucide-react";
+import { LogOut, LayoutGrid, Plus, Users, BarChart3 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { isAdminUser } from "@/lib/admin";
 import { getUserStats } from "@/server/queries/gamification";
 import { Logo } from "@/components/brand/logo";
 import { UserStatsChips } from "@/components/app/user-stats-chips";
@@ -18,7 +19,7 @@ export default async function AppLayout({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const stats = await getUserStats(user.id);
+  const [stats, admin] = await Promise.all([getUserStats(user.id), isAdminUser()]);
 
   return (
     <div className="min-h-dvh bg-background">
@@ -36,6 +37,11 @@ export default async function AppLayout({
               <Link href="/app/comunidad" className="flex items-center gap-1.5 hover:text-foreground">
                 <Users className="size-4" /> Comunidad
               </Link>
+              {admin && (
+                <Link href="/app/admin" className="flex items-center gap-1.5 font-medium text-primary hover:text-primary/80">
+                  <BarChart3 className="size-4" /> Admin
+                </Link>
+              )}
             </nav>
           </div>
           <div className="flex items-center gap-3">

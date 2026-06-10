@@ -4,9 +4,49 @@ import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { pathPurchases, learningPaths } from "@/db/schema";
+import { pathPurchases, learningPaths, routeIntents } from "@/db/schema";
 import { createPayment } from "@/lib/payments/flow";
 import { env } from "@/lib/env";
+
+/**
+ * Checkout de un INTENT de ruta (paywall pre-generación): crea el pago en
+ * Flow y redirige. El webhook (intent_<id>) confirma, crea la ruta y dispara
+ * la generación — la plata SIEMPRE llega antes que el costo de generar.
+ */
+export async function startIntentCheckoutAction(intentId: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const [intent] = await db
+    .select()
+    .from(routeIntents)
+    .where(and(eq(routeIntents.id, intentId), eq(routeIntents.userId, user.id)))
+    .limit(1);
+  if (!intent) redirect("/app/crear");
+  if (intent.status === "paid" && intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
+  if (intent.status !== "pending_payment") redirect("/app");
+
+  const amount = intent.amountClp ?? env.PRICE_ROUTE_CLP;
+  let redirectUrl: string;
+  try {
+    const payment = await createPayment({
+      commerceOrder: `intent_${intent.id}`,
+      subject: `Aulia — Ruta: ${intent.topic.slice(0, 60)}`,
+      amountCLP: amount,
+      email: user.email!,
+      urlConfirmation: `${env.NEXT_PUBLIC_SITE_URL}/api/flow/webhook`,
+      urlReturn: `${env.NEXT_PUBLIC_SITE_URL}/app/pagar/${intent.id}/retorno`,
+    });
+    redirectUrl = payment.redirectUrl;
+  } catch (e) {
+    console.error("[checkout] Flow create falló:", e);
+    redirect(`/app/pagar/${intent.id}?error=pago`);
+  }
+  redirect(redirectUrl);
+}
 
 /*
   Precios en CLP (Flow cobra en pesos chilenos). Ajusta según tu conversión y

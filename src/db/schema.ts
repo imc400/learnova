@@ -117,9 +117,47 @@ export const profiles = pgTable("profiles", {
   // reemplaza al nombre de pila si el usuario lo prefiere. NUNCA se expone PII.
   leaderboardVisible: boolean("leaderboard_visible").default(true).notNull(),
   leaderboardAlias: text("leaderboard_alias"),
+  // WhatsApp para avisos de ruta lista y remarketing (capturado en el wizard).
+  phone: text("phone"),
+  // Acceso al dashboard /app/admin (complementado por env.ADMIN_EMAILS).
+  isAdmin: boolean("is_admin").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ---------- Intents de ruta (embudo + carro abandonado) ----------
+// El wizard completo se guarda AQUÍ antes del paywall: si el usuario no paga,
+// tenemos tema + contacto para remarketing; si paga, el webhook crea la ruta.
+export const routeIntents = pgTable(
+  "route_intents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    topic: text("topic").notNull(),
+    level: text("level").notNull(),
+    language: text("language").default("es").notNull(),
+    goal: text("goal").notNull(),
+    priorExperience: text("prior_experience"),
+    weeklyHours: integer("weekly_hours"),
+    phone: text("phone"),
+    // pending_payment → paid (webhook) | bypassed (paywall off / Pro / admin)
+    status: text("status").default("pending_payment").notNull(),
+    pathId: uuid("path_id").references(() => learningPaths.id, {
+      onDelete: "set null",
+    }),
+    amountClp: integer("amount_clp"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    sourcePathId: uuid("source_path_id"), // métrica "Siguiente paso"
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("route_intents_user_idx").on(t.userId, t.createdAt),
+    statusIdx: index("route_intents_status_idx").on(t.status, t.createdAt),
+  }),
+);
 
 // ---------- Caché de "cabeza gruesa" (esqueletos canónicos reutilizables) ----------
 export const skeletonCache = pgTable(

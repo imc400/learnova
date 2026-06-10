@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  createPathAction,
+  createRouteIntentAction,
   wizardQuestionsAction,
 } from "@/server/actions/paths";
 import type { WizardQuestion } from "@/lib/ai/wizard";
@@ -44,6 +44,7 @@ export function CreateWizard({
   const [weeklyHours, setWeeklyHours] = useState("");
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
   const [answers, setAnswers] = useState<Answers>({});
+  const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loadingQuestions, startQuestions] = useTransition();
   const [creating, startCreate] = useTransition();
@@ -106,8 +107,14 @@ export function CreateWizard({
     [questions, answers],
   );
 
+  const phoneValid = /^\+?[\d\s().-]{8,20}$/.test(phone.trim());
+
   const submit = () => {
     setError(null);
+    if (!phoneValid) {
+      setError("Necesitamos tu WhatsApp para avisarte cuando tu ruta esté lista.");
+      return;
+    }
     // Composición: respuestas → goal / priorExperience. El topic NO se toca.
     const goalParts: string[] = [];
     const expParts: string[] = [];
@@ -124,18 +131,18 @@ export function CreateWizard({
     const goal = goalParts.join(". ") || `Quiero aprender ${topic.trim()}`;
     const priorExperience = expParts.join(". ");
 
-    const fd = new FormData();
-    fd.set("topic", topic.trim());
-    fd.set("goal", goal.slice(0, 600));
-    fd.set("level", level);
-    fd.set("language", language);
-    if (weeklyHours) fd.set("weeklyHours", weeklyHours);
-    if (priorExperience) fd.set("priorExperience", priorExperience.slice(0, 500));
-    if (fromPathId) fd.set("from", fromPathId);
-
     startCreate(async () => {
       try {
-        await createPathAction(fd);
+        await createRouteIntentAction({
+          topic: topic.trim(),
+          goal: goal.slice(0, 600),
+          level,
+          language,
+          weeklyHours: weeklyHours ? Number(weeklyHours) : undefined,
+          priorExperience: priorExperience ? priorExperience.slice(0, 500) : undefined,
+          phone: phone.trim(),
+          from: fromPathId || undefined,
+        });
       } catch (e) {
         // redirect() lanza internamente: solo es error real si NO es redirect.
         if (e && typeof e === "object" && "digest" in e) throw e;
@@ -285,6 +292,21 @@ export function CreateWizard({
               </div>
             );
           })}
+
+          <div className="flex flex-col gap-2.5">
+            <Label htmlFor="phone">Tu WhatsApp</Label>
+            <Input
+              id="phone"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+56 9 1234 5678"
+            />
+            <p className="text-xs text-muted-foreground">
+              Te avisamos por WhatsApp cuando tu ruta esté lista y te
+              acompañamos en tu avance.
+            </p>
+          </div>
 
           <div className="flex items-center gap-3">
             <Button

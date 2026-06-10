@@ -85,26 +85,30 @@ export async function getWeeklyBoard(): Promise<{
   const weekStart = mondayOf(todayInTz());
   const weekly = weeklyXpSubquery(weekStart);
 
+  // LEFT JOIN desde profiles: quien recién se une aparece con 0 pts (la
+  // comunidad SE VE — un INNER JOIN escondía a todo usuario sin XP semanal).
   const rows = await db
     .select({
       userId: profiles.id,
       displayName: displayNameExpr(),
       level: profiles.level,
       streak: profiles.currentStreak,
-      xp: weekly.xp,
+      xp: sql<number>`coalesce(${weekly.xp}, 0)`,
       studying: studyingExpr,
     })
-    .from(weekly)
-    .innerJoin(profiles, eq(profiles.id, weekly.userId))
+    .from(profiles)
+    .leftJoin(weekly, eq(weekly.userId, profiles.id))
     .where(eq(profiles.leaderboardVisible, true))
-    .orderBy(desc(weekly.xp), desc(profiles.totalXp))
+    .orderBy(
+      desc(sql`coalesce(${weekly.xp}, 0)`),
+      desc(profiles.totalXp),
+      desc(profiles.createdAt),
+    )
     .limit(BOARD_LIMIT);
 
-  const weekly2 = weeklyXpSubquery(weekStart);
   const [totals] = await db
     .select({ total: sql<number>`count(*)::int` })
-    .from(weekly2)
-    .innerJoin(profiles, eq(profiles.id, weekly2.userId))
+    .from(profiles)
     .where(eq(profiles.leaderboardVisible, true));
 
   return {
@@ -129,14 +133,14 @@ export async function getAllTimeBoard(): Promise<{
       studying: studyingExpr,
     })
     .from(profiles)
-    .where(and(eq(profiles.leaderboardVisible, true), gt(profiles.totalXp, 0)))
-    .orderBy(desc(profiles.totalXp))
+    .where(eq(profiles.leaderboardVisible, true))
+    .orderBy(desc(profiles.totalXp), desc(profiles.createdAt))
     .limit(BOARD_LIMIT);
 
   const [{ total } = { total: 0 }] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(profiles)
-    .where(and(eq(profiles.leaderboardVisible, true), gt(profiles.totalXp, 0)));
+    .where(eq(profiles.leaderboardVisible, true));
 
   return {
     rows: rows.map((r, i) => ({ ...r, xp: Number(r.xp), rank: i + 1 })),
@@ -167,15 +171,17 @@ export async function getMyWeeklyRank(userId: string): Promise<{
     .from(myDaily);
   const myXp = Number(me?.xp ?? 0);
 
-  // Cuántos visibles me superan esta semana (+1 = mi posición).
+  // Cuántos visibles me superan esta semana (+1 = mi posición). El total
+  // cuenta a TODA la comunidad visible (consistente con el board, que ahora
+  // incluye a quienes van en 0 XP).
   const weekly = weeklyXpSubquery(weekStart);
   const [counts] = await db
     .select({
-      ahead: sql<number>`count(*) filter (where ${weekly.xp} > ${myXp})::int`,
+      ahead: sql<number>`count(*) filter (where coalesce(${weekly.xp}, 0) > ${myXp})::int`,
       total: sql<number>`count(*)::int`,
     })
-    .from(weekly)
-    .innerJoin(profiles, eq(profiles.id, weekly.userId))
+    .from(profiles)
+    .leftJoin(weekly, eq(weekly.userId, profiles.id))
     .where(eq(profiles.leaderboardVisible, true));
 
   return {

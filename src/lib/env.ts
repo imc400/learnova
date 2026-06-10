@@ -51,6 +51,15 @@ const serverSchema = z.object({
     .string()
     .url()
     .default("https://sandbox.flow.cl/api"),
+
+  // --- Embudo de negocio ---
+  // "true" = el wizard exige pago ANTES de generar la ruta (requiere Flow
+  // configurado). Apagado: flujo gratuito con límite free de siempre.
+  PAYWALL_ENABLED: z.string().default("false"),
+  // Precio por ruta en CLP (override sin deploy).
+  PRICE_ROUTE_CLP: z.coerce.number().int().positive().default(9990),
+  // Acceso al dashboard admin además de profiles.is_admin (coma-separado).
+  ADMIN_EMAILS: z.string().default(""),
 });
 
 const clientSchema = z.object({
