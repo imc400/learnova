@@ -2,29 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useConversation } from "@elevenlabs/react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { Mic, MicOff, PhoneOff, GraduationCap, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { endClassAction } from "@/server/actions/live";
 
 /*
-  Cliente del aula: conversación de voz WebRTC con el profesor IA.
+  Cliente del aula: conversación de voz con el profesor IA.
   El prompt con el brief viene del SERVIDOR (overrides); aquí solo se conecta,
   se muestra el estado y se cierra la clase con ritual.
 */
 
 const MAX_CLASS_SECONDS = 30 * 60;
 
-export function AulaClient({
-  sessionId,
-  signedUrl,
-  prompt,
-  firstMessage,
-  language,
-  teacherName,
-  specialty,
-  pathId,
-}: {
+interface AulaProps {
   sessionId: string;
   signedUrl: string;
   prompt: string;
@@ -33,7 +24,26 @@ export function AulaClient({
   teacherName: string;
   specialty: string;
   pathId: string;
-}) {
+}
+
+export function AulaClient(props: AulaProps) {
+  return (
+    <ConversationProvider>
+      <AulaInner {...props} />
+    </ConversationProvider>
+  );
+}
+
+function AulaInner({
+  sessionId,
+  signedUrl,
+  prompt,
+  firstMessage,
+  language,
+  teacherName,
+  specialty,
+  pathId,
+}: AulaProps) {
   const router = useRouter();
   const [elapsed, setElapsed] = useState(0);
   const [ending, setEnding] = useState(false);
