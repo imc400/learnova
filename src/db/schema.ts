@@ -79,6 +79,15 @@ export const emailType = pgEnum("email_type", [
   "streak_at_risk",
   "weekly_recap",
   "reengagement",
+  "class_summary",
+  "class_reminder",
+]);
+export const liveSessionStatus = pgEnum("live_session_status", [
+  "scheduled",
+  "in_progress",
+  "completed",
+  "missed",
+  "canceled",
 ]);
 export const outboxStatus = pgEnum("outbox_status", [
   "pending",
@@ -606,6 +615,107 @@ export const nextPathSuggestions = pgTable(
     skeletonIdx: index("next_path_suggestions_skeleton_idx").on(
       t.skeletonCacheKey,
     ),
+  }),
+);
+
+// ---------- Clases en vivo con profesor IA ----------
+// Persona del profesor: UNA por esqueleto canónico (compartida entre usuarios
+// del mismo tema, como el contenido). La voz/LLM viven en ElevenLabs; la
+// identidad pedagógica vive aquí (lock-in bajo, migrable a LiveKit).
+export const routeAgents = pgTable(
+  "route_agents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cacheKey: text("cache_key").notNull(), // = skeleton_cache.cache_key
+    name: text("name").notNull(), // "Profe Valentina"
+    specialty: text("specialty").notNull(),
+    style: text("style").notNull(), // estilo pedagógico en 1-2 frases
+    greeting: text("greeting").notNull(), // saludo de marca
+    systemPrompt: text("system_prompt").notNull(), // persona + arco NSSA
+    elevenlabsAgentId: text("elevenlabs_agent_id"), // agente creado vía API
+    voiceId: text("voice_id"),
+    approved: boolean("approved").default(false).notNull(), // curaduría del fundador
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({ cacheKeyUniq: uniqueIndex("route_agents_cache_key_idx").on(t.cacheKey) }),
+);
+
+// Sesiones de clase (agendadas y on-demand). El cupo se mide en MINUTOS
+// (sum(duration_sec)) server-side ANTES de emitir credenciales.
+export const liveSessions = pgTable(
+  "live_sessions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    pathId: uuid("path_id")
+      .references(() => learningPaths.id, { onDelete: "cascade" })
+      .notNull(),
+    status: liveSessionStatus("status").default("scheduled").notNull(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    durationSec: integer("duration_sec").default(0).notNull(),
+    conversationId: text("conversation_id"), // id de ElevenLabs
+    summary: jsonb("summary"), // destilado post-clase (Haiku)
+    exitTicket: text("exit_ticket"), // respuesta metacognitiva del cierre
+    reminderRunIds: jsonb("reminder_run_ids").$type<string[]>(), // para cancelar al reagendar
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userIdx: index("live_sessions_user_idx").on(t.userId, t.createdAt),
+    statusIdx: index("live_sessions_status_idx").on(t.status, t.scheduledAt),
+  }),
+);
+
+// Tareas asignadas por el profesor (el loop: la tarea de hoy es el entrance
+// ticket de la próxima clase).
+export const homeworkItems = pgTable(
+  "homework_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sessionId: uuid("session_id")
+      .references(() => liveSessions.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    pathId: uuid("path_id")
+      .references(() => learningPaths.id, { onDelete: "cascade" })
+      .notNull(),
+    task: text("task").notNull(),
+    kind: text("kind").default("retrieval").notNull(), // retrieval | aplicada
+    done: boolean("done").default(false).notNull(),
+    reviewedInSessionId: uuid("reviewed_in_session_id").references(
+      () => liveSessions.id,
+      { onDelete: "set null" },
+    ),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    userPathIdx: index("homework_user_path_idx").on(t.userId, t.pathId, t.done),
+  }),
+);
+
+// Memoria del alumno por ruta (merge tras cada clase, no append infinito).
+export const learnerProfiles = pgTable(
+  "learner_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .references(() => profiles.id, { onDelete: "cascade" })
+      .notNull(),
+    pathId: uuid("path_id")
+      .references(() => learningPaths.id, { onDelete: "cascade" })
+      .notNull(),
+    profile: jsonb("profile").notNull(), // fortalezas, trabas, preferencias, últimaClase
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    uniqUserPath: uniqueIndex("learner_profiles_user_path_idx").on(t.userId, t.pathId),
   }),
 );
 

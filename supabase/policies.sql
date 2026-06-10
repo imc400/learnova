@@ -192,3 +192,21 @@ begin
     alter publication supabase_realtime add table public.learning_paths;
   end if;
 end $$;
+
+-- clases en vivo: dueño lee lo suyo; route_agents solo servidor (canónico)
+alter table public.route_agents     enable row level security;
+alter table public.live_sessions    enable row level security;
+alter table public.homework_items   enable row level security;
+alter table public.learner_profiles enable row level security;
+drop policy if exists "live_sessions_read_owner" on public.live_sessions;
+create policy "live_sessions_read_owner" on public.live_sessions
+  for select using (user_id = auth.uid());
+drop policy if exists "homework_read_owner" on public.homework_items;
+create policy "homework_read_owner" on public.homework_items
+  for select using (user_id = auth.uid());
+drop policy if exists "learner_profiles_read_owner" on public.learner_profiles;
+create policy "learner_profiles_read_owner" on public.learner_profiles
+  for select using (user_id = auth.uid());
+revoke insert, update, delete, truncate, trigger on public.route_agents,
+  public.live_sessions, public.homework_items, public.learner_profiles
+  from anon, authenticated;
