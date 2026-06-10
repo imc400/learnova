@@ -77,6 +77,11 @@ export async function subscribeProAction() {
     redirectUrl = r.redirectUrl;
   } catch (e) {
     console.error("[pro] customer/register falló:", e);
+    // Error 7001 de Flow: el comercio aún no tiene contrato de cobro
+    // automático (se activa con Flow una vez) — mensaje honesto, no genérico.
+    if ((e as Error).message?.includes("7001")) {
+      redirect("/app/planes?error=disponible");
+    }
     redirect("/app/planes?error=pago");
   }
   redirect(redirectUrl);

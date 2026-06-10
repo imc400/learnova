@@ -61,6 +61,13 @@ export default async function PlanesPage({
           Algo falló al iniciar la suscripción. Intenta de nuevo en unos segundos.
         </p>
       )}
+      {sp.error === "disponible" && (
+        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-center text-sm font-medium">
+          La suscripción Pro estará disponible muy pronto — estamos activando
+          el cobro automático. Mientras tanto puedes comprar rutas
+          individuales, y te avisaremos apenas Pro esté listo. ✺
+        </p>
+      )}
       {sp.error === "email" && (
         <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
           Tu correo no parece recibir mensajes (¿quedó con un error de tipeo?).
