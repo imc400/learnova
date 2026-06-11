@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { signupAutoConfirmedAction } from "@/server/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -60,18 +61,20 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
     try {
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        // Unificado con el funnel de ads: cuenta auto-confirmada, cero
+        // fricción de "revisa tu correo" (decisión de producto 2026-06-11).
+        const r = await signupAutoConfirmedAction({
           email,
           password,
-          options: {
-            data: { full_name: fullName, preferred_language: language },
-            emailRedirectTo: `${siteUrl}/auth/callback?next=${encodeURIComponent(next)}`,
-          },
+          fullName,
+          language,
         });
-        if (error) throw error;
-        setMessage(
-          "Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja (y el spam).",
-        );
+        if (!r.ok) {
+          setError(r.error ?? "No pudimos crear tu cuenta. Intenta de nuevo.");
+          return;
+        }
+        router.push(next);
+        router.refresh();
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
