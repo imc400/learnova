@@ -47,7 +47,7 @@ export async function NextStepCard({
           {suggestion.reasons.slice(0, 3).map((r, i) => (
             <li key={i} className="flex items-start gap-1.5 text-sm">
               <Trophy className="mt-0.5 size-3.5 shrink-0 text-primary" />
-              <span>{r}</span>
+              <span className="min-w-0 break-words">{r}</span>
             </li>
           ))}
         </ul>
@@ -58,7 +58,7 @@ export async function NextStepCard({
           {moduleTitles.slice(0, 6).map((t) => (
             <span
               key={t}
-              className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-card px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+              className="inline-flex max-w-full items-center gap-1 rounded-full border border-primary/20 bg-card px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
             >
               <Check size={11} className="shrink-0 text-primary" /> {t}
             </span>

@@ -116,7 +116,8 @@ export function AppNavMobile({
               isActive(href) ? "bg-muted font-medium" : ""
             }`}
           >
-            <Icon className="size-4 text-muted-foreground" /> {label}
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{label}</span>
           </Link>
         ))}
       </div>

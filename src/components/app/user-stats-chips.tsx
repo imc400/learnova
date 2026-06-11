@@ -34,8 +34,9 @@ export function UserStatsChips({
         aria-label={nivelInfo}
         className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary"
       >
-        <Star className="size-3.5 fill-current" aria-hidden />
-        Nivel {level}
+        <Star className="size-3.5 shrink-0 fill-current" aria-hidden />
+        <span className="hidden sm:inline">Nivel&nbsp;</span>
+        {level}
         <span className="hidden font-normal text-primary/80 sm:inline">
           · {totalXp.toLocaleString("es-CL")} XP
         </span>

@@ -382,7 +382,7 @@ export function CreateWizard({
                           key={opt}
                           type="button"
                           onClick={() => toggle(q, opt)}
-                          className={`rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
+                          className={`max-w-full break-words rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
                             active
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border bg-card text-foreground hover:border-primary/40"

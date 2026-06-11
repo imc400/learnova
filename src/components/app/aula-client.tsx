@@ -431,7 +431,7 @@ function AulaInner({
           href={`/app/rutas/${pathId}`}
           className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="size-4" /> {pathTitle}
+          <ArrowLeft className="size-4 shrink-0" /> {pathTitle}
         </Link>
       ) : (
         <p className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground">
@@ -527,7 +527,7 @@ function AulaInner({
         {live && agentLine && (
           <div
             aria-live="polite"
-            className="mt-4 w-full max-w-md rounded-lg rounded-tl-sm bg-muted px-4 py-3 text-left text-sm"
+            className="mt-4 w-full max-w-md break-words rounded-lg rounded-tl-sm bg-muted px-4 py-3 text-left text-sm"
           >
             {agentLine}
           </div>
@@ -535,8 +535,8 @@ function AulaInner({
 
         {/* Próxima clase agendada en vivo por el profesor. */}
         {scheduledNote && (
-          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary">
-            <CalendarCheck className="size-3.5" /> {scheduledNote}
+          <p className="mt-3 flex items-start gap-1.5 text-xs font-medium text-primary">
+            <CalendarCheck className="mt-0.5 size-3.5 shrink-0" /> {scheduledNote}
           </p>
         )}
 
@@ -661,7 +661,7 @@ function AulaInner({
                       ) : (
                         <span className="mt-0.5 inline-block size-3.5 shrink-0 rounded-sm border border-border" />
                       )}
-                      <span>
+                      <span className="min-w-0 break-words">
                         {i + 1}. {h.task}
                       </span>
                     </li>

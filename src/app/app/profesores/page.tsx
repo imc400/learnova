@@ -199,7 +199,7 @@ export default async function ProfesoresPage() {
                     {(agent?.name ?? "P").replace("Profe ", "").charAt(0)}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="font-display font-semibold">
+                    <p className="truncate font-display font-semibold">
                       {agent?.name ?? "Tu profesor"}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">

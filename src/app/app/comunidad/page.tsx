@@ -56,8 +56,9 @@ function Row({ row, isMe }: { row: BoardRow; isMe: boolean }) {
           {isMe && <span className="ml-1.5 text-xs font-normal text-primary">(tú)</span>}
         </p>
         {row.studying && (
-          <p className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-            <BookOpen className="size-3 shrink-0" /> Estudiando {row.studying}
+          <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+            <BookOpen className="size-3 shrink-0" />
+            <span className="truncate">Estudiando {row.studying}</span>
           </p>
         )}
       </div>

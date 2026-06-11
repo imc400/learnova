@@ -194,7 +194,7 @@ export function Quiz({
         const r = resultByQ.get(q.id);
         return (
           <div key={q.id} className="rounded-md border border-border bg-card p-4">
-            <p className="font-medium">
+            <p className="break-words font-medium">
               {qi + 1}. {q.prompt}
             </p>
 
@@ -260,10 +260,10 @@ export function Quiz({
                           onChange={() => toggle(q.id, opt.id, q.type === "multiple")}
                           className="accent-primary"
                         />
-                        <span className="flex-1">{opt.text}</span>
-                        {result && isCorrect && <Check className="size-4 text-primary" />}
+                        <span className="min-w-0 flex-1 break-words">{opt.text}</span>
+                        {result && isCorrect && <Check className="size-4 shrink-0 text-primary" />}
                         {result && selected && !isCorrect && (
-                          <X className="size-4 text-destructive" />
+                          <X className="size-4 shrink-0 text-destructive" />
                         )}
                       </label>
                     </li>

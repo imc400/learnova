@@ -37,7 +37,7 @@ export default async function AppLayout({
             <Logo href="/app" />
             <AppNavDesktop admin={!!admin} />
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-3">
             {stats && (
               <UserStatsChips
                 level={stats.level}
@@ -49,9 +49,9 @@ export default async function AppLayout({
             )}
             <Link
               href="/app/perfil"
-              className="hidden min-h-11 items-center rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              className="hidden min-h-11 max-w-40 items-center rounded-full border border-border bg-card px-3.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
             >
-              {firstName}
+              <span className="truncate">{firstName}</span>
             </Link>
             <form action="/auth/signout" method="post">
               <Button

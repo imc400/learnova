@@ -16,7 +16,8 @@ import {
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { moduleRatings, homeworkItems, liveSessions, learningPaths } from "@/db/schema";
+import { moduleRatings, homeworkItems, liveSessions, learningPaths, routeAgents } from "@/db/schema";
+import { VOICE_POOL } from "@/lib/live/provider";
 import { getEntitlement } from "@/lib/subscription";
 import { env } from "@/lib/env";
 import { getPathTree } from "@/server/queries/paths";
@@ -33,7 +34,7 @@ import { ModuleRating } from "@/components/app/module-rating";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Check } from "@/components/marketing/landing/icons";
+import { Check, Mic } from "@/components/marketing/landing/icons";
 
 export async function generateMetadata({
   params,
@@ -137,6 +138,43 @@ export default async function PathPage({
       ),
     )
     .limit(1);
+
+  // Avance real y desbloqueo de la clase completa (se calculan aquí porque
+  // deciden si la bienvenida es protagonista o banner discreto).
+  const progressPct =
+    path.lessonCount > 0
+      ? Math.round((path.completedLessons / path.lessonCount) * 100)
+      : 0;
+  const classUnlocked = progressPct >= CLASS_UNLOCK_PCT;
+
+  // EL MOMENTO WOW: ruta nueva (sin inducción, clase aún bloqueada) → la
+  // bienvenida con el profesor EN VIVO es LA card protagonista de la página.
+  const showWowInduction =
+    path.lessonCount > 0 && !classUnlocked && !inductionDone;
+
+  // Profesor real de la ruta (1 por esqueleto canónico — mismo lookup que
+  // /app/profesores). Solo se necesita para la card de bienvenida.
+  const [agent] = showWowInduction
+    ? await db
+        .select({
+          name: routeAgents.name,
+          specialty: routeAgents.specialty,
+          voiceId: routeAgents.voiceId,
+        })
+        .from(routeAgents)
+        .where(
+          eq(routeAgents.cacheKey, path.skeletonCacheKey ?? `path-${path.id}`),
+        )
+        .limit(1)
+    : [];
+
+  // Género gramatical del profe: por la voz asignada (catálogo cerrado);
+  // fallback al nombre si la voz aún no se resolvió.
+  const profIsFem = agent
+    ? (VOICE_POOL.find((v) => v.voiceId === agent.voiceId)?.gender ??
+        (agent.name.trim().toLowerCase().endsWith("a") ? "f" : "m")) === "f"
+    : false;
+  const profFirstName = agent ? agent.name.replace(/^profe\s+/i, "") : null;
 
   // Vigilante: una generación de >50 min está muerta (el job marca failed al
   // agotar reintentos, pero si ni eso corrió, la UI no gira para siempre).
@@ -329,6 +367,74 @@ export default async function PathPage({
         />
       )}
 
+      {/* EL MOMENTO WOW — ruta nueva sin inducción: conocer a tu profesor EN
+          VIVO es LA card protagonista de la página (única shadow-lift; el
+          temario baja a shadow-soft mientras esta exista). Los aura-ring en
+          loop están permitidos SOLO aquí: invitan a una clase en vivo real,
+          el análogo exacto del "en vivo" del aula. Solo presentación — la
+          action es la misma inducción de siempre. */}
+      {showWowInduction && (
+        <div className="dotgrid mt-6 rounded-xl border-2 border-primary/50 bg-card p-6 shadow-lift sm:p-8">
+          <div className="flex min-w-0 flex-col items-center gap-6 text-center sm:flex-row sm:gap-7 sm:text-left">
+            {/* Avatar con doble aura — patrón exacto de capitulo-profesor.tsx
+                (anillos hermanos adyacentes; base estática sin JS/motion). */}
+            <div className="relative mt-4 shrink-0 sm:mt-0">
+              <span className="aura-ring absolute inset-[-8px]" aria-hidden="true" />
+              <span className="aura-ring absolute inset-[-18px]" aria-hidden="true" />
+              <span className="relative flex size-18 items-center justify-center rounded-full bg-primary/10 font-display text-3xl text-primary">
+                {(profFirstName ?? "P").charAt(0).toUpperCase()}
+              </span>
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                Clase de bienvenida · en vivo y por voz
+              </p>
+              <h2 className="mt-1.5 font-display text-xl font-semibold text-balance break-words sm:text-2xl">
+                {profFirstName
+                  ? `Tu ${profIsFem ? "profesora" : "profesor"} ${profFirstName} te está esperando`
+                  : "Tu profesor te está esperando"}
+              </h2>
+              {agent && (
+                <p className="mt-1 text-sm font-medium text-muted-foreground break-words">
+                  {agent.name} · {agent.specialty}
+                </p>
+              )}
+              <p className="mt-2 text-sm text-muted-foreground">
+                Antes de partir, te da la bienvenida{" "}
+                <strong className="font-semibold text-foreground">
+                  en vivo y por voz
+                </strong>
+                : 10 minutos para conocerte, entender tu meta y dejarte lista
+                la ruta. Habla con {profIsFem ? "ella" : "él"} como con
+                cualquier profe.
+              </p>
+              <p className="hand mt-2 text-sm">esto hay que vivirlo ✺</p>
+              <form
+                action={startClassAction.bind(null, path.id, "induction")}
+                className="mt-4"
+              >
+                <SubmitButton
+                  variant="primary"
+                  size="lg"
+                  className="h-auto min-h-12 w-full whitespace-normal py-2.5 sm:w-auto"
+                  pendingText="Preparando tu clase…"
+                >
+                  <Mic size={18} />{" "}
+                  {profIsFem
+                    ? "Conocer a mi profesora en vivo"
+                    : "Conocer a mi profesor en vivo"}
+                </SubmitButton>
+              </form>
+              <p className="mt-2.5 text-xs text-muted-foreground">
+                Tu clase particular completa se desbloquea al{" "}
+                {CLASS_UNLOCK_PCT}% de avance (vas en {progressPct}%).
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Avance REAL del usuario (lecciones completadas) */}
       {path.lessonCount > 0 && (
         <div className="mt-6 rounded-lg border border-border bg-card p-4 shadow-soft">
@@ -357,84 +463,69 @@ export default async function PathPage({
         />
       )}
 
-      {/* Clase en vivo con el profesor IA: checkpoint de la ruta.
-          Se desbloquea al 40% — el alumno llega con avance real y dudas reales. */}
-      {path.lessonCount > 0 &&
-        (() => {
-          const pct = Math.round((path.completedLessons / path.lessonCount) * 100);
-          const unlocked = pct >= CLASS_UNLOCK_PCT;
-          return (
-            <div
-              className={`mt-6 rounded-xl border p-5 ${
-                unlocked
-                  ? "border-primary/30 bg-primary/5"
-                  : "border-dashed border-border bg-muted/40"
+      {/* Clase en vivo con el profesor IA: checkpoint de la ruta. Se
+          desbloquea al 40% — el alumno llega con avance real y dudas reales.
+          (La invitación a la bienvenida vive arriba como card protagonista;
+          aquí solo quedan los estados discretos.) */}
+      {path.lessonCount > 0 && !showWowInduction && (
+        <div
+          className={`mt-6 rounded-xl border p-5 ${
+            classUnlocked
+              ? "border-primary/30 bg-primary/5"
+              : "border-dashed border-border bg-muted/40"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <span
+              className={`grid size-10 shrink-0 place-items-center rounded-full border ${
+                classUnlocked
+                  ? "border-primary/40 bg-card text-primary"
+                  : "border-border bg-card text-muted-foreground"
               }`}
             >
-              <div className="flex items-start gap-3">
-                <span
-                  className={`grid size-10 shrink-0 place-items-center rounded-full border ${
-                    unlocked
-                      ? "border-primary/40 bg-card text-primary"
-                      : "border-border bg-card text-muted-foreground"
-                  }`}
-                >
-                  {unlocked ? (
-                    <GraduationCap className="size-5" />
-                  ) : (
-                    <Lock className="size-4" />
-                  )}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                    Clase en vivo con tu profesor
+              {classUnlocked ? (
+                <GraduationCap className="size-5" />
+              ) : (
+                <Lock className="size-4" />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Clase en vivo con tu profesor
+              </p>
+              {classUnlocked ? (
+                <>
+                  <p className="mt-1 text-sm font-medium">
+                    {progressPct >= 100
+                      ? "¡Completaste la ruta! Tu profesor quiere cerrar contigo: celebrar lo que lograste, consolidar lo esencial y mostrarte tu siguiente paso."
+                      : "Tu profesor IA conoce tu avance, tus quizzes y tu meta. Una clase de 25-30 min por voz para resolver tus dudas y afianzar lo que viene."}
                   </p>
-                  {unlocked ? (
-                    <>
-                      <p className="mt-1 text-sm font-medium">
-                        {pct >= 100
-                          ? "¡Completaste la ruta! Tu profesor quiere cerrar contigo: celebrar lo que lograste, consolidar lo esencial y mostrarte tu siguiente paso."
-                          : "Tu profesor IA conoce tu avance, tus quizzes y tu meta. Una clase de 25-30 min por voz para resolver tus dudas y afianzar lo que viene."}
-                      </p>
-                      <form action={startClassAction.bind(null, path.id, "class")} className="mt-3">
-                        <SubmitButton variant="primary" size="sm" pendingText="Preparando tu clase…">
-                          <GraduationCap className="size-4" />{" "}
-                          {pct >= 100 ? "Clase de cierre con tu profesor" : "Iniciar clase ahora"}
-                        </SubmitButton>
-                      </form>
-                    </>
-                  ) : inductionDone ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      <span className="font-semibold text-primary">
-                        Clase de bienvenida completada.
-                      </span>{" "}
-                      La clase completa se desbloquea al {CLASS_UNLOCK_PCT}% de
-                      avance (vas en {pct}%) — tu profesor te espera con tu
-                      progreso real.
-                    </p>
-                  ) : (
-                    <>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        La clase completa se desbloquea al {CLASS_UNLOCK_PCT}%
-                        de avance (vas en {pct}%). Pero tu profesor ya quiere
-                        conocerte:
-                      </p>
-                      <form
-                        action={startClassAction.bind(null, path.id, "induction")}
-                        className="mt-3"
-                      >
-                        <SubmitButton variant="outline" size="sm" pendingText="Preparando…">
-                          <GraduationCap className="size-4" /> Clase de
-                          bienvenida: conoce a tu profesor (10 min)
-                        </SubmitButton>
-                      </form>
-                    </>
-                  )}
-                </div>
-              </div>
+                  <form action={startClassAction.bind(null, path.id, "class")} className="mt-3">
+                    <SubmitButton
+                      variant="primary"
+                      size="sm"
+                      className="h-auto min-h-9 w-full whitespace-normal py-2 sm:w-auto"
+                      pendingText="Preparando tu clase…"
+                    >
+                      <GraduationCap className="size-4" />{" "}
+                      {progressPct >= 100 ? "Clase de cierre con tu profesor" : "Iniciar clase ahora"}
+                    </SubmitButton>
+                  </form>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  <span className="font-semibold text-primary">
+                    Clase de bienvenida completada.
+                  </span>{" "}
+                  La clase completa se desbloquea al {CLASS_UNLOCK_PCT}% de
+                  avance (vas en {progressPct}%) — tu profesor te espera con tu
+                  progreso real.
+                </p>
+              )}
             </div>
-          );
-        })()}
+          </div>
+        </div>
+      )}
 
       {/* Tareas del profesor (asignadas en clase) con recursos de apoyo */}
       {homework.length > 0 && (
@@ -486,8 +577,13 @@ export default async function PathPage({
       )}
 
       {/* El temario como página de cuaderno (canon: mock del hero).
-          Única shadow-lift de la pantalla. */}
-      <div className="ruled mock-margin mt-8 rounded-lg bg-card p-5 shadow-lift sm:p-6">
+          Única shadow-lift de la pantalla — salvo cuando la bienvenida es
+          protagonista: ahí la lift es de ella y el temario baja a soft. */}
+      <div
+        className={`ruled mock-margin mt-8 rounded-lg bg-card p-5 sm:p-6 ${
+          showWowInduction ? "shadow-soft" : "shadow-lift"
+        }`}
+      >
         <div className="space-y-7">
           {path.modules.map((m, mi) => {
             const remaining = m.lessons.length - m.completedCount;

@@ -201,9 +201,9 @@ export default async function DashboardPage() {
                 last.lessonCount > 0 && last.completedLessons === last.lessonCount;
               return (
               <div key={chain[0]!.id}>
-                <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-primary">
-                  <Route className="size-4" /> Camino de {chain[0]!.topic}
-                  <span className="font-normal text-muted-foreground">
+                <h2 className="flex min-w-0 flex-wrap items-center gap-2 font-display text-sm font-semibold text-primary">
+                  <Route className="size-4 shrink-0" /> Camino de {chain[0]!.topic}
+                  <span className="shrink-0 font-normal text-muted-foreground">
                     · {chain.length} rutas
                   </span>
                 </h2>
@@ -284,10 +284,10 @@ export default async function DashboardPage() {
             const cardBody = (
               <>
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-display font-semibold leading-tight">
+                  <h3 className="min-w-0 break-words font-display font-semibold leading-tight">
                     {p.title}
                   </h3>
-                  <Badge variant={s.variant} className={s.className}>{s.label}</Badge>
+                  <Badge variant={s.variant} className={`shrink-0 ${s.className ?? ""}`}>{s.label}</Badge>
                 </div>
                 {p.status === "failed" ? (
                   <p className="mt-2 text-sm text-muted-foreground">
@@ -307,7 +307,7 @@ export default async function DashboardPage() {
                     className="mt-4"
                   />
                 )}
-                <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                   <span className="capitalize">{p.level}</span>
                   {p.estimatedHours ? <span>· ~{Math.round(p.estimatedHours)} h</span> : null}
                   {p.completedLessons > 0 && remaining > 0 && remaining <= 3 && (
