@@ -127,15 +127,15 @@ export default async function PlanesPage({
           <p className="mt-4 font-display text-3xl font-bold text-primary">
             ${pro.toLocaleString("es-CL")}
             <span className="ml-1 text-sm font-semibold text-muted-foreground">
-              CLP / mes
+              {proAutomatico ? "CLP / mes" : "CLP · por 30 días"}
             </span>
           </p>
           <ul className="mt-5 space-y-2.5 text-sm">
             {[
               { icon: Map, t: `${env.PRO_ROUTES_PER_MONTH} rutas nuevas a tu medida cada mes` },
               { icon: GraduationCap, t: "Clases en vivo con tu profesor cada semana" },
-              { icon: Library, t: "Acceso ilimitado al catálogo de rutas" },
-              { icon: Zap, t: "Prioridad de generación + funciones nuevas antes" },
+              { icon: Library, t: "Tus rutas se encadenan en Caminos" },
+              { icon: Zap, t: "Funciones nuevas antes que nadie" },
             ].map((f, i) => (
               <li key={i} className="flex items-start gap-2.5">
                 <f.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {f.t}

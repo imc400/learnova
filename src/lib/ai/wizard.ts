@@ -4,7 +4,7 @@ import { getAnthropic, cachedSystem } from "@/lib/ai/client";
 import { MODELS } from "@/lib/ai/models";
 
 /*
-  Intake adaptativo: Haiku diseña 3-4 preguntas ESPECÍFICAS del tema para
+  Intake adaptativo: Haiku diseña 2-3 preguntas ESPECÍFICAS del tema para
   personalizar la ruta (meta, experiencia, contexto/equipo). Catálogo de
   componentes CERRADO (single/multi/text) — la UI solo sabe renderizar esos.
 
@@ -33,12 +33,12 @@ export const wizardQuestionSchema = z.object({
 });
 
 export const wizardSchema = z.object({
-  questions: z.array(wizardQuestionSchema).min(3).max(4),
+  questions: z.array(wizardQuestionSchema).min(2).max(3),
 });
 
 export type WizardQuestion = z.infer<typeof wizardQuestionSchema>;
 
-const WIZARD_INSTRUCTIONS = `Eres el diseñador de admisión de Aulia, una plataforma de rutas de aprendizaje personalizadas. Dado un TEMA y un NIVEL, diseña 3-4 preguntas cortas para personalizar la ruta de este estudiante.
+const WIZARD_INSTRUCTIONS = `Eres el diseñador de admisión de Aulia, una plataforma de rutas de aprendizaje personalizadas. Dado un TEMA y un NIVEL, diseña 2-3 preguntas cortas para personalizar la ruta de este estudiante.
 
 Reglas:
 1. La PRIMERA pregunta siempre indaga la meta concreta (mapsTo: "goal", kind: "single") con 4-5 opciones que sean metas REALES y específicas de ese tema — no genéricas. Ej. para "fotografía con celular": "Tomar mejores fotos de mis productos para vender", "Fotografiar a mi familia y viajes", etc.
@@ -46,7 +46,7 @@ Reglas:
 3. Si el tema tiene contexto material o de herramientas relevante (equipo, instrumento, software, presupuesto), pregunta por él (mapsTo: "goal", kind: "single" o "multi") — esa respuesta afecta qué videos le sirven. Ej.: ¿celular o cámara?, ¿guitarra acústica o eléctrica?, ¿Excel o Google Sheets?
 4. Opciones de máximo 60 caracteres, mutuamente excluyentes en "single". Nada de "Otro" (la UI lo agrega sola).
 5. Todo en el idioma indicado, tuteando, tono cercano chileno-neutro (sin modismos fuertes).
-6. Máximo 4 preguntas: cada una debe ganarse su lugar — si no cambia la ruta, no va.`;
+6. Máximo 3 preguntas: cada una debe ganarse su lugar — si no cambia la ruta, no va.`;
 
 /** Preguntas de respaldo si Haiku falla: el flujo NUNCA se bloquea. */
 export function fallbackQuestions(topic: string): WizardQuestion[] {

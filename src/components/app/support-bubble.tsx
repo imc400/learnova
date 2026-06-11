@@ -127,7 +127,7 @@ export function SupportBubble() {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label={open ? "Cerrar soporte" : "Abrir soporte"}
-        className="fixed bottom-5 right-4 z-50 grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lift transition-transform hover:scale-105"
+        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-4 z-50 grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lift transition-transform hover:scale-105"
       >
         {open ? <X className="size-6" /> : <MessageCircle className="size-6" />}
       </button>

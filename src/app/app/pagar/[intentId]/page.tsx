@@ -13,7 +13,6 @@ import {
   ArrowRight,
   Map,
   Library,
-  Zap,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
@@ -190,7 +189,7 @@ export default async function PagarPage({
               { icon: PlayCircle, t: "Los mejores videos, con minutos clave marcados" },
               { icon: CheckCircle2, t: "Quizzes + XP, racha y logros" },
               { icon: GraduationCap, t: "Tu profesor: bienvenida + clases en vivo" },
-              { icon: Mail, t: "Tareas y avances a tu correo y WhatsApp" },
+              { icon: Mail, t: "Tareas y avances a tu correo" },
             ].map((it, i) => (
               <li key={i} className="flex items-start gap-2.5">
                 <it.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {it.t}
@@ -218,7 +217,7 @@ export default async function PagarPage({
           <p className="mt-3 font-display text-3xl font-bold text-primary">
             ${pro.toLocaleString("es-CL")}
             <span className="ml-1 text-xs font-semibold text-muted-foreground">
-              CLP / mes
+              {proAutomatico ? "CLP / mes" : "CLP · por 30 días"}
             </span>
           </p>
           <ul className="mt-4 flex-1 space-y-2 text-sm">
@@ -226,8 +225,7 @@ export default async function PagarPage({
               { icon: Sparkles, t: "Esta ruta queda incluida HOY" },
               { icon: Map, t: `${env.PRO_ROUTES_PER_MONTH} rutas nuevas a tu medida cada mes` },
               { icon: Mic, t: "Clases en vivo extra todos los meses" },
-              { icon: Library, t: "Catálogo de rutas ilimitado" },
-              { icon: Zap, t: "Prioridad de generación" },
+              { icon: Library, t: "Tus rutas se encadenan en Caminos" },
             ].map((it, i) => (
               <li key={i} className="flex items-start gap-2.5">
                 <it.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {it.t}

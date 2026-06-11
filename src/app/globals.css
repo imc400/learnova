@@ -182,6 +182,439 @@
   background-size: 22px 22px;
 }
 
+/* ============================================================
+   ANIMACIÓN — tokens @theme (generan utilidades animate-*)
+   ============================================================ */
+
+@theme {
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Hero / above-the-fold: animación CSS pura, sin JS, sin IO. */
+  --animate-fade-up: fade-up 0.65s var(--ease-out-soft) both;
+  --animate-fade-in: fade-in 0.6s ease-out both;
+  --animate-scale-in: scale-in 0.55s var(--ease-out-soft) both;
+  /* Flotación decorativa (stickers, fichas, doodles). */
+  --animate-float: float 6s ease-in-out infinite;
+  /* Barra de progreso que avanza "a tics" (pasos discretos). */
+  --animate-tick-progress: tick-progress 1.4s steps(24, end) both;
+  /* Subrayado de resaltador que se dibuja (versión autónoma). */
+  --animate-draw-underline: draw-underline 0.9s cubic-bezier(0.65, 0, 0.35, 1) both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(22px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+  @keyframes tick-progress {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(var(--progress, 1));
+    }
+  }
+  @keyframes draw-underline {
+    from {
+      background-size: 0% 100%;
+    }
+    to {
+      background-size: 100% 100%;
+    }
+  }
+  @keyframes marquee-scroll {
+    to {
+      transform: translateX(calc(-100% - var(--marquee-gap, 2.5rem)));
+    }
+  }
+}
+
+/* ============================================================
+   REVEAL ON SCROLL — estado CSS para <Reveal /> (data-attributes)
+   Solo se oculta contenido si hay JS (scripting: enabled) y el
+   usuario acepta movimiento. Sin JS o con reduced-motion, el
+   HTML del servidor queda visible tal cual: cero riesgo SEO/CLS.
+   ============================================================ */
+
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  [data-reveal]:not([data-reveal="none"]) {
+    opacity: 0;
+    transition:
+      opacity 0.6s var(--ease-out-soft),
+      transform 0.6s var(--ease-out-soft);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+  [data-reveal="fade-up"] {
+    transform: translateY(22px);
+  }
+  [data-reveal="scale-in"] {
+    transform: scale(0.94);
+  }
+  [data-reveal="slide-left"] {
+    transform: translateX(28px);
+  }
+  [data-reveal="slide-right"] {
+    transform: translateX(-28px);
+  }
+  [data-reveal][data-revealed] {
+    opacity: 1;
+    transform: none;
+  }
+  /* El subrayado se dibuja cuando su sección se revela (encadenable). */
+  [data-reveal][data-revealed] .hl-draw {
+    background-size: 100% 100%;
+  }
+}
+
+/* ============================================================
+   UTILIDADES DE ANIMACIÓN — resaltador, marquee, progreso
+   ============================================================ */
+
+/* Subrayado de resaltador que se dibuja de izquierda a derecha.
+   BASE = pintado (SSR / sin JS / reduced-motion siempre ven el resaltador);
+   solo con JS + motion parte en 0% y lo dibuja [data-revealed] (arriba). */
+@utility hl-draw {
+  background-image: linear-gradient(
+    180deg,
+    transparent 58%,
+    var(--highlight) 58%,
+    var(--highlight) 94%,
+    transparent 94%
+  );
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: 100% 100%;
+  padding: 0 0.12em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .hl-draw {
+    background-size: 0% 100%;
+    transition: background-size 0.9s cubic-bezier(0.65, 0, 0.35, 1);
+    transition-delay: calc(var(--reveal-delay, 0ms) + 250ms);
+  }
+}
+
+/* Marquee pausable (logos, testimonios). Markup: un .marquee con DOS
+   .marquee-track idénticos (el segundo con aria-hidden="true"). */
+@utility marquee {
+  display: flex;
+  overflow: hidden;
+  gap: var(--marquee-gap, 2.5rem);
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 10%,
+    black 90%,
+    transparent
+  );
+
+  &:hover > *,
+  &:focus-within > * {
+    animation-play-state: paused;
+  }
+}
+
+@utility marquee-track {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 100%;
+  align-items: center;
+  justify-content: space-around;
+  gap: var(--marquee-gap, 2.5rem);
+  animation: marquee-scroll var(--marquee-duration, 32s) linear infinite;
+}
+
+/* Pausa accesible del marquee (WCAG 2.2.2): un checkbox estilizado fuera
+   del track — teclado y touch incluidos, cero JS. El wrapper contiene
+   tanto el control como el .marquee. */
+.marquee-wrap:has(.marquee-toggle:checked) .marquee-track {
+  animation-play-state: paused;
+}
+.marquee-toggle:checked ~ * .lbl-pausar,
+.marquee-toggle:checked ~ .lbl-pausar {
+  display: none;
+}
+.marquee-toggle:not(:checked) ~ * .lbl-seguir,
+.marquee-toggle:not(:checked) ~ .lbl-seguir {
+  display: none;
+}
+
+/* Barra de progreso: el fill anima con transform (no width → no layout).
+   Uso: <div class="progress-fill animate-tick-progress" style="--progress:.66" /> */
+@utility progress-fill {
+  transform-origin: left center;
+  transform: scaleX(var(--progress, 1));
+}
+
+/* ============================================================
+   PREFERS-REDUCED-MOTION — red de seguridad global
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    /* Sin esto, los delays escalonados (hero hasta 2.1s) dejan el contenido
+       en el frame "from" (invisible) aunque la duración sea ~0. */
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+  html {
+    scroll-behavior: auto !important;
+  }
+  .marquee-track {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   LANDING «TACHADO Y SUBRAYADO» — utilities y keyframes nuevos
+   ============================================================ */
+
+/* Cinta de papel gris — contraparte "vieja forma" de tab-note.
+   Solo se usa en Acto 1 y en el ledger del Recap. */
+@utility tape-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-hand);
+  font-weight: 700;
+  font-size: 18px;
+  background: var(--border);
+  color: var(--muted-foreground);
+  padding: 3px 14px 4px;
+  border-radius: 4px 4px 4px 0;
+  transform: rotate(-2deg);
+  box-shadow: var(--shadow-soft);
+  /* Textos largos (frases tachadas) deben poder quebrar línea en 375px:
+     sin esto, el min-content del flex infla la columna del grid padre. */
+  min-width: 0;
+  max-width: 100%;
+  & > * {
+    min-width: 0;
+  }
+}
+
+/* Tachado de lápiz rojo que se dibuja. Gradiente + box-decoration-break
+   (NO ::after absoluto): si el texto quiebra a 2 líneas en 375px, cada
+   línea recibe SU raya. BASE = tachado YA pintado (SSR / sin JS / reduce). */
+@utility strike-draw {
+  background-image: linear-gradient(
+    180deg,
+    transparent 47%,
+    var(--destructive) 47%,
+    var(--destructive) 56%,
+    transparent 56%
+  );
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: 100% 100%;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .strike-draw {
+    background-size: 0% 100%;
+    transition: background-size 0.5s var(--ease-out-soft);
+    transition-delay: var(--strike-delay, 0ms);
+  }
+  /* Disparo universal (filas del Recap): el propio Reveal tacha. */
+  .strike-on-reveal[data-revealed] .strike-draw {
+    background-size: 100% 100%;
+  }
+  /* Mobile/tablet: cada ficha del Acto 1 se tacha al entrar al viewport. */
+  @media (max-width: 1023.98px) {
+    .strike-on-reveal-mobile .strike-draw {
+      transition-delay: 450ms;
+    }
+    .strike-on-reveal-mobile[data-revealed] .strike-draw {
+      background-size: 100% 100%;
+    }
+  }
+  /* Desktop: el sentinel del grid (rootMargin adelantado) coordina
+     el tachado masivo con la llegada de la Bisagra. */
+  @media (min-width: 1024px) {
+    .strike-on-reveal-desktop[data-revealed] .strike-draw {
+      background-size: 100% 100%;
+    }
+  }
+}
+
+/* Sticker que se pega — micro-alegría one-shot de chips XP/logro.
+   BASE = pegado, con su rotación final. */
+@utility sticker-pop {
+  display: inline-flex;
+  transform: rotate(var(--pop-rotate, 2deg));
+}
+
+@keyframes sticker-pop {
+  0%   { opacity: 0; transform: scale(0.5) rotate(-8deg); }
+  70%  { opacity: 1; transform: scale(1.08) rotate(var(--pop-rotate, 2deg)); }
+  100% { opacity: 1; transform: scale(1) rotate(var(--pop-rotate, 2deg)); }
+}
+
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  /* Versión autónoma (hero, delays absolutos). */
+  .sticker-pop-auto {
+    animation: sticker-pop 0.5s var(--ease-out-soft) both;
+    animation-delay: var(--pop-delay, 0ms);
+  }
+  /* Versión gateada por Reveal (capítulo 4). */
+  [data-reveal] .sticker-pop-reveal { opacity: 0; }
+  [data-reveal][data-revealed] .sticker-pop-reveal {
+    animation: sticker-pop 0.5s var(--ease-out-soft) both;
+    animation-delay: var(--pop-delay, 0ms);
+  }
+}
+
+/* Check SVG que se dibuja (hero). BASE = dibujado. */
+@keyframes draw-stroke {
+  to { stroke-dashoffset: 0; }
+}
+@utility check-draw {
+  stroke-dasharray: 26;
+  stroke-dashoffset: 0;
+}
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .check-draw {
+    stroke-dashoffset: 26;
+    animation: draw-stroke 0.35s ease-out forwards;
+    animation-delay: var(--draw-delay, 0ms);
+  }
+}
+
+/* Aula en vivo: aura y onda de voz. BASE estática (reduce = quieta). */
+@keyframes pulse-aura {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50%      { transform: scale(1.12); opacity: 0.2; }
+}
+@keyframes wave-talk {
+  0%, 100% { transform: scaleY(0.45); }
+  50%      { transform: scaleY(1); }
+}
+@utility aura-ring {
+  border-radius: 9999px;
+  border: 2px solid color-mix(in srgb, var(--primary) 30%, transparent);
+}
+@utility wave-bar {
+  transform-origin: center;
+  transform: scaleY(0.6);
+  border-radius: 9999px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .aura-ring { animation: pulse-aura 2.4s ease-in-out infinite; }
+  .aura-ring:nth-child(2) { animation-delay: 0.5s; }
+  .wave-bar { animation: wave-talk 1.1s ease-in-out infinite; }
+  .wave-bar:nth-child(2) { animation-delay: 0.15s; }
+  .wave-bar:nth-child(3) { animation-delay: 0.3s; }
+  .wave-bar:nth-child(4) { animation-delay: 0.45s; }
+}
+
+/* CTA final: caret + placeholders rotando. BASE = primer placeholder fijo. */
+@keyframes caret-blink {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes placeholder-cycle {
+  0%, 28%  { opacity: 1; transform: none; }
+  33%, 100% { opacity: 0; transform: translateY(-4px); }
+}
+@utility type-cycle {
+  display: grid;
+  > span {
+    grid-area: 1 / 1;
+    opacity: 0;
+  }
+  > span:first-child { opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .type-cycle > span {
+    animation: placeholder-cycle 9s linear infinite;
+    /* fase negativa CRECIENTE: -9s/-6s/-3s → orden real 1→2→3
+       (con i*-3s el orden quedaba 1→3→2) */
+    animation-delay: calc(var(--cycle-i, 0) * 3s - 9s);
+  }
+  .caret-blink { animation: caret-blink 1.1s steps(1) infinite; }
+}
+
+/* Margen rojo de cuaderno escolar — SOLO dentro de mocks. */
+@utility mock-margin {
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 34px;
+    width: 1px;
+    background: color-mix(in srgb, var(--destructive) 20%, transparent);
+    pointer-events: none;
+  }
+}
+
+/* Rendering bajo el fold. */
+@utility cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 600px;
+}
+
+/* Barra de lectura: trazo de resaltador (enhancement gateado).
+   Sin soporte (iOS hoy): no existe, nada se rompe. */
+@supports (animation-timeline: scroll(root)) {
+  .scroll-progress {
+    position: fixed;
+    inset: 64px 0 auto 0;
+    height: 3px;
+    background: var(--highlight);
+    transform-origin: left center;
+    z-index: 45;
+    animation: tick-progress linear both;
+    animation-timeline: scroll(root);
+    pointer-events: none;
+  }
+}
+@supports not (animation-timeline: scroll(root)) {
+  .scroll-progress { display: none; }
+}
+
 /* pestaña/ficha adhesiva manuscrita */
 @utility tab-note {
   display: inline-flex;

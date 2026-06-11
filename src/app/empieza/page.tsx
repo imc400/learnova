@@ -210,7 +210,7 @@ export default function EmpiezaPage() {
               },
               {
                 q: "¿Cuánto tarda mi ruta?",
-                a: "El mapa completo aparece al instante y las primeras lecciones en minutos. Te avisamos por correo y WhatsApp cuando esté lista.",
+                a: "La estructura, unos 2 minutos. El contenido se completa lección por lección — lo primero que vas a estudiar se genera primero — y te avisamos al correo cuando tu primer módulo está listo.",
               },
             ].map((f, i) => (
               <div key={i}>

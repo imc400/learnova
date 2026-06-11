@@ -304,8 +304,7 @@ export function CreateWizard({
               placeholder="+56 9 1234 5678"
             />
             <p className="text-xs text-muted-foreground">
-              Te avisamos por WhatsApp cuando tu ruta esté lista y te
-              acompañamos en tu avance.
+              Te avisamos al correo cuando tu primer módulo esté listo.
             </p>
           </div>
 

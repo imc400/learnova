@@ -8,12 +8,7 @@ import { site } from "@/lib/site";
  */
 export function AuliaMark({ className }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 120 120"
-      className={className}
-      role="img"
-      aria-label="Aulia"
-    >
+    <svg viewBox="0 0 120 120" className={className} aria-hidden="true">
       <path
         d="M34 84 C30 101 22 105 13 109 C31 107 45 99 51 86 Z"
         fill="#0E5340"
@@ -39,10 +34,12 @@ export function Logo({
   const content = (
     <span className={cn("inline-flex items-center gap-2", className)}>
       <AuliaMark className="size-8" />
-      {withText && (
+      {withText ? (
         <span className="font-display text-xl font-semibold tracking-tight text-foreground">
           {site.name}
         </span>
+      ) : (
+        <span className="sr-only">{site.name}</span>
       )}
     </span>
   );

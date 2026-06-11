@@ -6,9 +6,9 @@ export const site = {
     "Aulia crea tu ruta de aprendizaje a medida con IA: módulos paso a paso, pruebas reales, un tutor en vivo y el mejor video de internet curado para ti.",
   url: process.env.NEXT_PUBLIC_SITE_URL ?? "https://aulia.ai",
   pricing: {
-    subscriptionMonthly: 15, // USD
-    singlePath: 19, // USD
-    currency: "USD" as const,
+    singlePath: 9990, // CLP, pago único
+    proThirtyDays: 24990, // CLP, cobro único 30 días, sin renovación automática
+    currency: "CLP" as const,
   },
   social: {
     instagram: "https://instagram.com/aulia",

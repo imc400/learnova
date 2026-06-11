@@ -132,7 +132,7 @@ export function FunnelWizard() {
   };
 
   const selectClass =
-    "h-11 rounded-md border border-input bg-card px-3 text-sm text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
+    "h-11 rounded-md border border-input bg-card px-3 text-base text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
 
   return (
     <div className="mt-8">
@@ -165,6 +165,7 @@ export function FunnelWizard() {
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               placeholder="Ej: Inteligencia artificial, Fotografía, Inglés…"
+              className="text-base"
               autoFocus
             />
           </div>
@@ -190,6 +191,9 @@ export function FunnelWizard() {
           <p className="text-center text-xs text-muted-foreground">
             2 minutos · La IA diseña tu ruta exactamente para tu meta
           </p>
+          <p className="-mt-3 text-center text-xs text-muted-foreground">
+            desde $9.990, tuya para siempre
+          </p>
         </div>
       )}
 
@@ -206,7 +210,7 @@ export function FunnelWizard() {
                     value={a?.selected[0] ?? ""}
                     onChange={(e) => setText(q.id, e.target.value)}
                     placeholder={q.placeholder ?? ""}
-                    className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-base shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                   />
                 ) : (
                   <div className="flex flex-wrap gap-2">
@@ -218,7 +222,7 @@ export function FunnelWizard() {
                           key={opt}
                           type="button"
                           onClick={() => toggle(q, opt)}
-                          className={`rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
+                          className={`min-h-11 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
                             active
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border bg-card hover:border-primary/40"
@@ -235,6 +239,7 @@ export function FunnelWizard() {
                     value={a.other}
                     onChange={(e) => setOther(q.id, e.target.value)}
                     placeholder="Cuéntanos con tus palabras…"
+                    className="text-base"
                     autoFocus
                   />
                 )}
@@ -242,7 +247,7 @@ export function FunnelWizard() {
             );
           })}
           <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" onClick={() => setStep(1)} aria-label="Volver">
+            <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(1)} aria-label="Volver">
               <ArrowLeft className="size-4" />
             </Button>
             <Button size="lg" className="flex-1" onClick={() => setStep(3)} disabled={answeredCount === 0}>
@@ -262,22 +267,22 @@ export function FunnelWizard() {
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="f-name">Tu nombre</Label>
-            <Input id="f-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Camila" />
+            <Input id="f-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Camila" className="text-base" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="f-email">Tu correo</Label>
-            <Input id="f-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@gmail.com" />
+            <Input id="f-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@gmail.com" className="text-base" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="f-phone">Tu WhatsApp</Label>
-            <Input id="f-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" />
+            <Input id="f-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" className="text-base" />
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="f-pass">Crea tu contraseña</Label>
-            <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" />
+            <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" className="text-base" />
           </div>
           <div className="mt-1 flex items-center gap-3">
-            <Button variant="outline" size="icon" onClick={() => setStep(2)} disabled={creating} aria-label="Volver">
+            <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(2)} disabled={creating} aria-label="Volver">
               <ArrowLeft className="size-4" />
             </Button>
             <Button size="lg" className="flex-1" onClick={submit} disabled={creating}>
@@ -293,8 +298,8 @@ export function FunnelWizard() {
             </Button>
           </div>
           <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-            <Lock className="size-3" /> Tus datos van cifrados. Te enviaremos tu
-            ruta por correo y WhatsApp.
+            <Lock className="size-3" /> Tus datos van cifrados. Tu avance y tus
+            tareas te llegan al correo; dejas tu WhatsApp para acompañarte.
           </p>
         </div>
       )}
