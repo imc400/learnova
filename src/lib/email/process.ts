@@ -408,7 +408,12 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
     }
 
     // 5) Render + envío.
-    const site = env.NEXT_PUBLIC_SITE_URL;
+    // CINTURÓN: un correo a un cliente JAMÁS puede llevar links a localhost
+    // (pasó: el deploy de Trigger sincronizó el .env local de la máquina del
+    // fundador). Si la env viene mal, se fuerza el dominio de producción.
+    const site = /localhost|127\.0\.0\.1/i.test(env.NEXT_PUBLIC_SITE_URL)
+      ? "https://www.aulia.ai"
+      : env.NEXT_PUBLIC_SITE_URL;
     const unsubscribeUrl = `${site}/api/email/unsubscribe?token=${prefs.unsubToken}`;
     // Destino del CTA según el tipo: los de ciclo de vida no llevan a la ruta.
     const ctaUrl =

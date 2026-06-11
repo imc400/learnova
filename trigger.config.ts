@@ -45,9 +45,16 @@ export default defineConfig({
           "AI_DISABLED",
           "LIFECYCLE_EMAILS_ENABLED",
         ];
-        return keys
+        const vars = keys
           .filter((k) => process.env[k])
           .map((k) => ({ name: k, value: process.env[k] as string }));
+        // Los workers SIEMPRE son producción: jamás heredar el localhost del
+        // .env de la máquina de deploy (un carro abandonado con link a
+        // localhost = venta perdida). Override explícito vía TRIGGER_SITE_URL.
+        const siteUrl = process.env.TRIGGER_SITE_URL ?? "https://www.aulia.ai";
+        return vars.map((v) =>
+          v.name === "NEXT_PUBLIC_SITE_URL" ? { ...v, value: siteUrl } : v,
+        );
       }),
     ],
   },
