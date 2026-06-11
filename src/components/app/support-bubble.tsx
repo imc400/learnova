@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { MessageCircle, X, Send, Loader2 } from "lucide-react";
 
 /*
@@ -28,6 +29,7 @@ export function SupportBubble() {
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const pathname = usePathname();
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -68,6 +70,12 @@ export function SupportBubble() {
       setSending(false);
     }
   };
+
+  // En la lección, la esquina inferior derecha es del FAB del profesor
+  // (lesson-tutor.tsx): soporte se esconde ahí — la opción menos invasiva
+  // (cero cambios al layout del shell; este componente ya es client).
+  // OJO: el return va DESPUÉS de todos los hooks (orden estable).
+  if (/^\/app\/rutas\/[^/]+\/leccion\//.test(pathname ?? "")) return null;
 
   return (
     <>

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   learningPaths,
@@ -11,6 +11,8 @@ import {
   homeworkItems,
   learnerProfiles,
   nextPathSuggestions,
+  tutorConversations,
+  tutorMessages,
 } from "@/db/schema";
 
 /*
@@ -43,7 +45,7 @@ export async function buildClassBrief(
   pathId: string,
   teacherGreeting: string,
 ): Promise<ClassBrief> {
-  const [[path], [prof], mods, attempts, pendingHw, doneHw, [learner]] = await Promise.all([
+  const [[path], [prof], mods, attempts, pendingHw, doneHw, [learner], tutorQuestions] = await Promise.all([
     db
       .select({
         title: learningPaths.title,
@@ -131,6 +133,25 @@ export async function buildClassBrief(
       .from(learnerProfiles)
       .where(and(eq(learnerProfiles.userId, userId), eq(learnerProfiles.pathId, pathId)))
       .limit(1),
+    // Puente texto→voz: lo que más preguntó al TUTOR DE TEXTO esta semana
+    // (misma persona, otro canal). Solo mensajes del alumno, recientes.
+    db
+      .select({ content: tutorMessages.content })
+      .from(tutorMessages)
+      .innerJoin(
+        tutorConversations,
+        eq(tutorConversations.id, tutorMessages.conversationId),
+      )
+      .where(
+        and(
+          eq(tutorConversations.userId, userId),
+          eq(tutorConversations.pathId, pathId),
+          eq(tutorMessages.role, "user"),
+          gt(tutorMessages.createdAt, sql`now() - interval '7 days'`),
+        ),
+      )
+      .orderBy(desc(tutorMessages.createdAt))
+      .limit(8),
   ]);
 
   const firstName = (prof?.fullName ?? "").trim().split(" ")[0] || "estudiante";
@@ -192,6 +213,18 @@ export async function buildClassBrief(
     }
   }
 
+  // Preguntas al tutor de texto, solo primeras líneas, presupuesto ~600 chars
+  // (es color para la clase, no el plato principal del brief).
+  const tutorTopics: string[] = [];
+  let tutorTopicChars = 0;
+  for (const q of tutorQuestions) {
+    const line = (q.content.split("\n")[0] ?? "").trim().slice(0, 90);
+    if (!line) continue;
+    if (tutorTopicChars + line.length > 600) break;
+    tutorTopicChars += line.length;
+    tutorTopics.push(line);
+  }
+
   // Módulos numerados desde 0: el índice exacto que espera `enfocar_modulo`
   // (sin esto el profesor adivina y enfoca el módulo equivocado).
   const moduleIndexLine = mods.length
@@ -226,6 +259,9 @@ export async function buildClassBrief(
       : doneHw.length
         ? "- Sin tareas pendientes: las hizo todas."
         : "- Sin tareas pendientes (¿primera clase?).",
+    tutorTopics.length
+      ? `- Temas que más preguntó al tutor de texto esta semana (eres tú por chat — retómalos si ayudan): ${tutorTopics.map((t) => `"${t}"`).join(" | ")}`
+      : "",
     prof?.streak ? `- Racha: ${prof.streak} días. XP: ${prof.totalXp}.` : "",
     ...memoryLines,
   ]

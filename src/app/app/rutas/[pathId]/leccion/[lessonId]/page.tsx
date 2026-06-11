@@ -11,13 +11,14 @@ import {
 import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { lessons, modules, learningPaths } from "@/db/schema";
+import { lessons, modules, learningPaths, routeAgents } from "@/db/schema";
 import { getLessonDetail } from "@/server/queries/lessons";
+import { getLessonConversation } from "@/server/queries/tutor";
 import { completeLessonAction } from "@/server/actions/quiz";
 import { RouteProgressLive } from "@/components/app/route-progress-live";
 import { YouTubeEmbed } from "@/components/app/youtube-embed";
 import { Quiz } from "@/components/app/quiz";
-import { TutorChat } from "@/components/app/tutor-chat";
+import { LessonTutor } from "@/components/app/lesson-tutor";
 import { SubmitButton } from "@/components/app/submit-button";
 import { RichText } from "@/components/app/rich-text";
 import type { LessonContent } from "@/lib/ai/schemas";
@@ -61,6 +62,21 @@ export default async function LessonPage({
   if (!detail) notFound();
 
   const content = detail.lesson.content as LessonContent | null;
+
+  // Memoria del tutor (tablas tutor_* existentes) + nombre del profesor de
+  // voz de la ruta: el chat se presenta como la misma persona del aula.
+  // OJO: pathId REAL del módulo (no el de la URL, que el join no valida) —
+  // el API persiste con el real; ambos lados deben usar la misma clave.
+  const [tutorHistory, [teacher]] = await Promise.all([
+    getLessonConversation(user.id, detail.module.pathId, lessonId),
+    detail.path.skeletonCacheKey
+      ? db
+          .select({ name: routeAgents.name })
+          .from(routeAgents)
+          .where(eq(routeAgents.cacheKey, detail.path.skeletonCacheKey))
+          .limit(1)
+      : Promise.resolve([] as { name: string }[]),
+  ]);
 
   // Acción de completar (inline server action que captura los ids).
   // Sin redirect: el usuario se queda en la lección y ve el estado completado;
@@ -214,10 +230,14 @@ export default async function LessonPage({
         ) : null}
       </article>
 
-      {/* Tutor (sidebar) */}
+      {/* Tutor: sidebar en desktop; FAB + bottom sheet en móvil (una sola
+          instancia — misma conversación en ambos modos). */}
       <aside className="lg:sticky lg:top-24 lg:self-start">
-        <TutorChat
+        <LessonTutor
           context={tutorContext}
+          lessonId={lessonId}
+          teacherName={teacher?.name ?? null}
+          initialMessages={tutorHistory}
           suggestions={[
             "¿Me lo explicas con un ejemplo simple?",
             "No entendí los puntos clave, ¿me los aclaras?",
