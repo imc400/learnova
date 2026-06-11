@@ -24,6 +24,7 @@ import { getPathTree } from "@/server/queries/paths";
 import { startClassAction, toggleHomeworkAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
 import { GeneratingState } from "@/components/app/generating-state";
+import { PurchaseTracker } from "@/components/analytics/purchase-tracker";
 
 /** % de avance que desbloquea la clase en vivo con el profesor IA. */
 const CLASS_UNLOCK_PCT = 40;
@@ -97,10 +98,21 @@ export default async function PathPage({
     clase_error?: string;
     induccion?: string;
     pro?: string;
+    compra?: string;
+    monto?: string;
   }>;
 }) {
   const { pathId } = await params;
   const sp = await searchParams;
+
+  // Meta Purchase: los redirects post-pago llegan con ?compra=&monto=. Se
+  // renderiza en TODAS las ramas (la ruta recién pagada está "generating",
+  // que es justamente donde aterriza el comprador). El tracker dispara UNA
+  // vez (guard localStorage + eventID) y limpia los params de la URL.
+  const purchaseTracker =
+    sp.compra && sp.monto ? (
+      <PurchaseTracker compra={sp.compra} monto={Number(sp.monto) || 0} />
+    ) : null;
   const supabase = await createClient();
   const {
     data: { user },
@@ -186,6 +198,7 @@ export default async function PathPage({
   if (path.status === "generating" && !generationStale) {
     return (
       <div className="mx-auto max-w-2xl">
+        {purchaseTracker}
         <GeneratingState
           pathId={path.id}
           initialProgress={path.generationProgress}
@@ -204,6 +217,7 @@ export default async function PathPage({
   if (path.status === "failed" || generationStale) {
     return (
       <div className="mx-auto max-w-xl rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
+        {purchaseTracker}
         <AlertTriangle className="mx-auto size-8 text-destructive" />
         <h2 className="mt-4 font-display text-lg font-semibold">
           No pudimos generar esta ruta
@@ -262,6 +276,7 @@ export default async function PathPage({
 
   return (
     <div className="mx-auto max-w-3xl">
+      {purchaseTracker}
       <Link
         href="/app"
         className="inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"

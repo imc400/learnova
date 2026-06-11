@@ -45,10 +45,15 @@ async function handle(token: string | null): Promise<NextResponse> {
       return to("/app/planes?error=pago");
     }
 
+    // Params de compra para el Purchase de Meta en el aterrizaje (mismo
+    // eventID `purchase-prom-<id>` que manda la CAPI → Meta deduplica).
+    const montoPro = Number(status.amount) || env.PRICE_PRO_CLP;
+    const compraQs = `compra=prom-${purchaseId}&monto=${montoPro}`;
+
     // ¿Venía del paywall? Su ruta ya se creó (o se crea AQUÍ si el convert
     // del webhook falló — es idempotente) → aterriza EN la ruta.
     const pathId = await convertPendingIntent(result.userId);
-    if (pathId) return to(`/app/rutas/${pathId}?pro=bienvenida`);
+    if (pathId) return to(`/app/rutas/${pathId}?pro=bienvenida&${compraQs}`);
 
     // Sin pending: quizá el webhook ya lo convirtió hace segundos.
     const [last] = await db
@@ -64,7 +69,9 @@ async function handle(token: string | null): Promise<NextResponse> {
       .limit(1);
     const recienConvertida =
       last?.pathId && Date.now() - last.updatedAt.getTime() < 15 * 60_000;
-    if (recienConvertida) return to(`/app/rutas/${last.pathId}?pro=bienvenida`);
+    if (recienConvertida) {
+      return to(`/app/rutas/${last.pathId}?pro=bienvenida&${compraQs}`);
+    }
 
     return to("/app/crear?pro=bienvenida");
   } catch (e) {

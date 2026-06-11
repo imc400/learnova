@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Fredoka, Nunito_Sans, Caveat } from "next/font/google";
 import { site } from "@/lib/site";
+import { MetaPixel } from "@/components/analytics/meta-pixel";
 import "./globals.css";
 
 // Texto (UI/cuerpo): Nunito Sans — humanista, legible, con ñ y acentos.
@@ -60,7 +61,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es" className={`${nunito.variable} ${fredoka.variable} ${caveat.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <MetaPixel />
+      </body>
     </html>
   );
 }

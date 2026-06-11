@@ -118,6 +118,11 @@ const serverSchema = z.object({
   // HMAC del workspace para el conversation-initiation webhook de ElevenLabs
   // (/api/live/initiation): el system prompt deja de viajar al navegador.
   ELEVENLABS_WEBHOOK_SECRET: z.string().min(1).optional(),
+
+  // --- Meta Conversions API (fase 2 de medición de ads) ---
+  // Token de la CAPI del píxel. Vacío = apagado: los Purchase server-side
+  // (sendCapiPurchase) no-opean y solo mide el píxel del navegador.
+  META_CAPI_ACCESS_TOKEN: z.string().default(""),
 });
 
 const clientSchema = z.object({
@@ -127,6 +132,9 @@ const clientSchema = z.object({
     .string()
     .url()
     .default("http://localhost:3000"),
+  // ID del píxel de Meta (medición de campañas). Vacío = píxel apagado
+  // (no se inyecta fbevents.js y fbqTrack no-opea).
+  NEXT_PUBLIC_META_PIXEL_ID: z.string().default(""),
 });
 
 /** Variables expuestas al cliente (deben empezar con NEXT_PUBLIC_). */
@@ -134,6 +142,7 @@ const clientEnv = {
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+  NEXT_PUBLIC_META_PIXEL_ID: process.env.NEXT_PUBLIC_META_PIXEL_ID,
 };
 
 // No validar durante `next build`: el build NO necesita los secretos de runtime

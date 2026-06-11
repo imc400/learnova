@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { fbqTrack } from "@/lib/analytics/meta";
 import { signupAutoConfirmedAction } from "@/server/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,6 +74,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
           setError(r.error ?? "No pudimos crear tu cuenta. Intenta de nuevo.");
           return;
         }
+        // Meta: registro completado (señal de embudo para las campañas).
+        fbqTrack("CompleteRegistration");
         router.push(next);
         router.refresh();
       } else {

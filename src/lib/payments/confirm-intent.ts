@@ -1,8 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { routeIntents, learningPaths, pathPurchases } from "@/db/schema";
+import { routeIntents, learningPaths, pathPurchases, profiles } from "@/db/schema";
 import { buildPathInsertValues } from "@/lib/paths/create";
 import { enqueuePathGeneration } from "@/lib/generation/run";
+import { sendCapiPurchase } from "@/lib/analytics/meta-capi";
 import { alertFounder } from "@/lib/ops/alert";
 
 /*
@@ -130,6 +131,25 @@ export async function confirmIntentPaid(args: {
       status: "paid",
     })
     .catch((e) => console.error("[pagos] registro contable:", e));
+
+  // Meta Conversions API (best-effort, gateada por META_CAPI_ACCESS_TOKEN):
+  // MISMO eventID que el Purchase del navegador → Meta deduplica. Un fallo
+  // aquí JAMÁS toca el flujo de pago (try/catch total).
+  try {
+    const [prof] = await db
+      .select({ email: profiles.email, phone: profiles.phone })
+      .from(profiles)
+      .where(eq(profiles.id, result.intent.userId))
+      .limit(1);
+    await sendCapiPurchase({
+      eventId: `purchase-${args.intentId}`,
+      valueClp: args.chargedAmountClp || result.intent.amountClp || 0,
+      email: prof?.email,
+      phone: prof?.phone ?? result.intent.phone,
+    });
+  } catch (e) {
+    console.error("[pagos] meta-capi purchase:", e);
+  }
   return "created";
 }
 

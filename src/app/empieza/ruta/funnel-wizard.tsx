@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { Seal, Shield } from "@/components/marketing/landing/icons";
 import { formatPrice } from "@/lib/utils";
+import { fbqTrack } from "@/lib/analytics/meta";
 import { site } from "@/lib/site";
 import {
   publicWizardQuestionsAction,
@@ -67,6 +68,9 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
         setAnswers({});
         setLevelKept(false);
         setStep(2);
+        // Meta: intención temprana del wizard de ads (paso 1 → 2). Señal
+        // barata para construir públicos de remarketing por tema.
+        fbqTrack("AddToCart", { content_name: topic.trim() });
       } catch {
         setError("No pudimos preparar tus preguntas. Intenta de nuevo.");
       }

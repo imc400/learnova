@@ -1,7 +1,9 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { pathPurchases, subscriptions } from "@/db/schema";
+import { pathPurchases, profiles, subscriptions } from "@/db/schema";
 import { convertPendingIntent } from "@/lib/payments/convert-pending-intent";
+import { sendCapiPurchase } from "@/lib/analytics/meta-capi";
+import { env } from "@/lib/env";
 
 /*
   PRO MANUAL: un cobro único = 30 días de Pro completo, SIN cobro automático
@@ -86,6 +88,25 @@ export async function confirmProMonthPaid(args: {
   // la transacción; convertPendingIntent es idempotente con su propio lock).
   if (result.kind === "activated" && result.userId) {
     await convertPendingIntent(result.userId);
+
+    // Meta Conversions API (best-effort, gateada por META_CAPI_ACCESS_TOKEN):
+    // MISMO eventID que el Purchase del navegador (`purchase-prom-<id>`) →
+    // Meta deduplica. Un fallo aquí JAMÁS toca la activación de Pro.
+    try {
+      const [prof] = await db
+        .select({ email: profiles.email, phone: profiles.phone })
+        .from(profiles)
+        .where(eq(profiles.id, result.userId))
+        .limit(1);
+      await sendCapiPurchase({
+        eventId: `purchase-prom-${args.purchaseId}`,
+        valueClp: args.chargedAmountClp || env.PRICE_PRO_CLP,
+        email: prof?.email,
+        phone: prof?.phone,
+      });
+    } catch (e) {
+      console.error("[pro] meta-capi purchase:", e);
+    }
   }
   return result;
 }

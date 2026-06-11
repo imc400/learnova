@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { routeIntents } from "@/db/schema";
 import { AutoRefresh } from "@/components/app/auto-refresh";
 import { reconcileIntentWithProvider } from "@/lib/ops/reconcile";
+import { env } from "@/lib/env";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { CelebracionStickers } from "@/components/app/brand/celebracion-stickers";
 import { Button } from "@/components/ui/button";
@@ -52,6 +53,7 @@ export default async function RetornoPage({
     .select({
       status: routeIntents.status,
       pathId: routeIntents.pathId,
+      amountClp: routeIntents.amountClp,
       updatedAt: routeIntents.updatedAt,
     })
     .from(routeIntents)
@@ -78,6 +80,7 @@ export default async function RetornoPage({
         .select({
           status: routeIntents.status,
           pathId: routeIntents.pathId,
+          amountClp: routeIntents.amountClp,
           updatedAt: routeIntents.updatedAt,
         })
         .from(routeIntents)
@@ -87,7 +90,13 @@ export default async function RetornoPage({
     }
   }
 
-  if (intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
+  if (intent.pathId) {
+    // pathId existe = pago confirmado y ruta creada → se aterriza con los
+    // params de compra para que PurchaseTracker dispare el Purchase de Meta
+    // (deduplicado por eventID con la Conversions API y con guard local).
+    const monto = intent.amountClp ?? env.PRICE_ROUTE_CLP;
+    redirect(`/app/rutas/${intent.pathId}?compra=${intentId}&monto=${monto}`);
+  }
 
   if (intent.status === "pending_payment") {
     return (

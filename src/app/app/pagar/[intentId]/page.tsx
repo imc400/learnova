@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { SkeletonCuaderno } from "@/components/app/brand/skeleton-cuaderno";
 import { AutoRefresh } from "@/components/app/auto-refresh";
+import { PaywallTracker, TrackCheckout } from "@/components/analytics/paywall-tracker";
 import { Seal } from "@/components/marketing/landing/icons";
 import { providerLabel } from "@/lib/payments/provider";
 import { formatPrice } from "@/lib/utils";
@@ -155,6 +156,8 @@ export default async function PagarPage({
 
   return (
     <div className="mx-auto max-w-2xl">
+      {/* Meta: ViewContent + Lead (deduplicados por eventID y sesión). */}
+      <PaywallTracker intentId={intent.id} amountClp={amount} />
       <div className="text-center">
         <Badge variant="primary" className="capitalize">{intent.level}</Badge>
         <h1 className="mt-3 font-display text-2xl font-bold tracking-tight sm:text-3xl">
@@ -273,16 +276,18 @@ export default async function PagarPage({
               </li>
             ))}
           </ul>
-          <form action={startIntentCheckoutAction.bind(null, intent.id)} className="mt-4">
-            <SubmitButton
-              size="lg"
-              className="w-full"
-              variant="outline"
-              pendingText="Conectando…"
-            >
-              <ShieldCheck className="size-4" /> Desbloquear mi ruta
-            </SubmitButton>
-          </form>
+          <TrackCheckout intentId={intent.id} amountClp={amount} plan="ruta">
+            <form action={startIntentCheckoutAction.bind(null, intent.id)} className="mt-4">
+              <SubmitButton
+                size="lg"
+                className="w-full"
+                variant="outline"
+                pendingText="Conectando…"
+              >
+                <ShieldCheck className="size-4" /> Desbloquear mi ruta
+              </SubmitButton>
+            </form>
+          </TrackCheckout>
         </div>
 
         {/* Pro — recomendado (o "tu elección" si vino de la landing con Pro) */}
@@ -326,11 +331,13 @@ export default async function PagarPage({
               <span>Tus rutas se encadenan en Caminos</span>
             </li>
           </ul>
-          <form action={subscribeProAction.bind(null, intent.id)} className="mt-4">
-            <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
-              <Sparkles className="size-4" /> Empezar con Pro
-            </SubmitButton>
-          </form>
+          <TrackCheckout intentId={intent.id} amountClp={pro} plan="pro">
+            <form action={subscribeProAction.bind(null, intent.id)} className="mt-4">
+              <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
+                <Sparkles className="size-4" /> Empezar con Pro
+              </SubmitButton>
+            </form>
+          </TrackCheckout>
           {!proAutomatico && (
             <p className="mt-2 text-center text-[11px] font-medium text-muted-foreground">
               Sin cobro automático: pagas 30 días y te avisamos para renovar.
