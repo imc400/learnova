@@ -9,7 +9,7 @@ import {
   createCustomer,
   registerCard,
   cancelSubscription,
-  createPayment,
+  createPaymentSafe,
 } from "@/lib/payments/flow";
 import { env } from "@/lib/env";
 
@@ -131,7 +131,7 @@ async function startProMonthCheckout(args: {
 
   let redirectUrl: string;
   try {
-    const payment = await createPayment({
+    const payment = await createPaymentSafe({
       commerceOrder: `prom_${purchase.id}`,
       subject: "Aulia Pro — 1 mes (sin cobro automático)",
       amountCLP: env.PRICE_PRO_CLP,

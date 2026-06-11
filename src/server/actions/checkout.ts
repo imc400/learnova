@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { routeIntents } from "@/db/schema";
-import { createPayment } from "@/lib/payments/flow";
+import { createPaymentSafe } from "@/lib/payments/flow";
 import { createPreference } from "@/lib/payments/mercadopago";
 import { activeProvider } from "@/lib/payments/provider";
 import { env } from "@/lib/env";
@@ -52,7 +52,7 @@ export async function startIntentCheckoutAction(intentId: string) {
       });
       redirectUrl = pref.initPoint;
     } else {
-      const payment = await createPayment({
+      const payment = await createPaymentSafe({
         commerceOrder: `intent_${intent.id}`,
         subject: `Aulia — Ruta: ${intent.topic.slice(0, 60)}`,
         amountCLP: amount,

@@ -74,6 +74,29 @@ export async function createPayment(
   return { ...data, redirectUrl: `${data.url}?token=${data.token}` };
 }
 
+/**
+ * createPayment con red de seguridad: Flow VERIFICA que el buzón exista
+ * (error 1620) y eso convierte un typo del cliente en una venta perdida.
+ * Si el correo es rechazado y hay respaldo configurado, se reintenta UNA
+ * vez con FLOW_RECEIPT_FALLBACK_EMAIL — la boleta de Flow llega al respaldo
+ * y la comunicación real con el cliente va por nuestros propios correos.
+ */
+export async function createPaymentSafe(
+  input: CreatePaymentInput,
+): Promise<CreatePaymentResult> {
+  try {
+    return await createPayment(input);
+  } catch (e) {
+    const fallback = env.FLOW_RECEIPT_FALLBACK_EMAIL;
+    const emailInvalido = (e as Error).message?.includes("is not valid");
+    if (!emailInvalido || !fallback || input.email === fallback) throw e;
+    console.warn(
+      `[flow] correo "${input.email}" rechazado (1620) — reintentando boleta con respaldo`,
+    );
+    return createPayment({ ...input, email: fallback });
+  }
+}
+
 export interface FlowStatus {
   status: number; // 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
   commerceOrder: string;

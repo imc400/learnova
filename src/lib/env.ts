@@ -57,6 +57,10 @@ const serverSchema = z.object({
 
   // Proveedor ACTIVO para pagos one-time (cambio sin deploy de código).
   PAYMENT_PROVIDER: z.enum(["flow", "mercadopago"]).default("mercadopago"),
+  // Flow VERIFICA que el buzón del pagador exista (error 1620) — un typo en
+  // el correo NO puede bloquear una venta: la boleta de Flow se reintenta
+  // con este respaldo y nuestros correos manejan la comunicación real.
+  FLOW_RECEIPT_FALLBACK_EMAIL: z.string().default(""),
 
   // --- Embudo de negocio ---
   // "true" = el wizard exige pago ANTES de generar la ruta (requiere Flow
