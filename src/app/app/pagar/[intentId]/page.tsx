@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { routeIntents } from "@/db/schema";
+import { routeIntents, skeletonCache } from "@/db/schema";
 import { startIntentCheckoutAction } from "@/server/actions/checkout";
 import { subscribeProAction } from "@/server/actions/subscription";
 import { generateRoutePreview } from "@/lib/ai/wizard";
@@ -59,14 +59,29 @@ export default async function PagarPage({
     redirect("/app/crear");
   }
 
-  // Preview perezoso: si el intent nació sin temario, se genera AQUÍ con
-  // timeout (el SSR jamás se cuelga por Haiku) y se persiste con escritura
-  // CONDICIONAL (where preview is null) — cargas concurrentes no se pisan
-  // y el costo queda acotado (solo el dueño autenticado llega aquí).
-  // P0: el .catch(() => null) evita que un rechazo del modelo tumbe el
-  // paywall a 500 — con preview null se degrada al esqueleto de abajo.
+  // Preview perezoso. PRIMERO la verdad: si el esqueleto canónico ya existe
+  // en skeleton_cache (misma derivación de key que run.ts:73), el temario
+  // mostrado es EXACTAMENTE el que recibirá tras pagar — la promesa "ves tu
+  // temario antes de pagar" deja de depender de un Haiku que puede divergir.
+  // Haiku queda solo para el gancho (y como fallback sin canon), con timeout
+  // y .catch(() => null): el SSR jamás se cuelga ni cae a 500.
+  // Persistencia CONDICIONAL (where preview is null): cargas concurrentes
+  // no se pisan y el costo queda acotado (solo el dueño autenticado llega).
   let preview = intent.preview;
   if (!preview?.modules?.length) {
+    const cacheKey = `${intent.topic.toLowerCase().trim()}-${intent.level}-${intent.language}`;
+    const [canon] = await db
+      .select({ skeleton: skeletonCache.skeleton })
+      .from(skeletonCache)
+      .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, 1)))
+      .limit(1);
+    const canonModules = (
+      canon?.skeleton as { modules?: Array<{ title?: string }> } | undefined
+    )?.modules
+      ?.map((m) => m.title ?? "")
+      .filter(Boolean)
+      .slice(0, 7);
+
     const fresh = await Promise.race([
       generateRoutePreview({
         topic: intent.topic,
@@ -76,11 +91,13 @@ export default async function PagarPage({
       }).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), 4500)),
     ]);
-    if (fresh) {
+
+    const modules = canonModules?.length ? canonModules : (fresh?.modules ?? []);
+    if (modules.length) {
       const metaHead = intent.goal.split(".")[0] ?? "";
       preview = {
-        modules: fresh.modules,
-        hook: fresh.hook,
+        modules,
+        hook: fresh?.hook ?? "",
         metaDisplay:
           metaHead.length > 160 ? `${metaHead.slice(0, 159).trimEnd()}…` : metaHead,
       };

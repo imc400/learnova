@@ -26,6 +26,9 @@ export default defineConfig({
           "EMAIL_FROM",
           "NEXT_PUBLIC_SITE_URL",
           "GEMINI_API_KEY",
+          // summarize-class lee la transcripción desde ElevenLabs: sin esta
+          // var el worker muere y el alumno se queda sin resumen ni tareas.
+          "ELEVENLABS_API_KEY",
         ];
         return keys
           .filter((k) => process.env[k])

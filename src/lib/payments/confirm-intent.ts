@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { routeIntents, learningPaths, pathPurchases } from "@/db/schema";
 import { buildPathInsertValues } from "@/lib/paths/create";
 import { enqueuePathGeneration } from "@/lib/generation/run";
+import { alertFounder } from "@/lib/ops/alert";
 
 /*
   Confirmación de pago de un INTENT — punto ÚNICO de verdad, agnóstico del
@@ -81,6 +82,17 @@ export async function confirmIntentPaid(args: {
     console.error(
       `[pagos] CRÍTICO: ruta ${result.pathId} pagada SIN generación encolada — intervenir`,
     );
+    await alertFounder({
+      titulo: "Pago cobrado SIN generación encolada",
+      detalle:
+        "Un cliente pagó y los 3 intentos de encolar la generación fallaron. La ruta existe pero no se está generando — reintentar desde el admin o re-encolar a mano.",
+      contexto: {
+        pathId: result.pathId,
+        intentId: args.intentId,
+        proveedor: args.provider,
+        montoClp: args.chargedAmountClp,
+      },
+    });
   }
 
   if (

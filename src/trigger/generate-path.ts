@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { runPathGeneration } from "@/lib/generation/run";
 import { db } from "@/db";
 import { learningPaths } from "@/db/schema";
+import { alertFounder } from "@/lib/ops/alert";
 
 /** Job de generación de ruta (Opus → Sonnet → Haiku + curación de video). */
 export const generatePathTask = task({
@@ -35,6 +36,14 @@ export const generatePathTask = task({
     } catch (e) {
       console.error("[trigger] no se pudo marcar failed:", e);
     }
+    // Dinero ya cobrado + generación muerta = incidente: el fundador se
+    // entera por correo, no por el reclamo del cliente.
+    await alertFounder({
+      titulo: "Generación de ruta MURIÓ tras 3 intentos",
+      detalle:
+        "La generación falló definitivamente. La ruta quedó en 'failed' (la UI ofrece reintentar), pero si fue una compra hay un cliente esperando — revisar el run en Trigger.dev y reintentar.",
+      contexto: { pathId: payload.pathId, error: String(error).slice(0, 300) },
+    });
   },
   run: async (payload: { pathId: string }) => {
     await runPathGeneration(payload.pathId);
