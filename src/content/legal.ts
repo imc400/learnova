@@ -15,7 +15,7 @@ Al usar el Servicio aceptas las prácticas descritas en esta Política. Si no es
 
 Aulia es operado desde Chile. El responsable del tratamiento de tus datos es Aulia.
 
-- **Correo de contacto y privacidad:** igblancora@gmail.com
+- **Correo de contacto y privacidad:** hola@aulia.ai
 
 Para cualquier consulta, solicitud de acceso o eliminación de datos, escríbenos a esa dirección.
 
@@ -44,7 +44,7 @@ Si en algún momento Google revoca o termina nuestro acceso a la API de YouTube,
 - **Contenido que generas:** tus interacciones con el tutor de IA, tus respuestas a las pruebas (quizzes) y tu progreso de aprendizaje.
 
 ### 3.2. Información de pago
-Si compras una suscripción Pro o una ruta única, el pago se procesa a través de **Flow.cl**. Aulia no almacena los datos completos de tu tarjeta; estos son tratados directamente por el procesador de pagos. Conservamos un identificador de la transacción, el estado del pago, el monto y la moneda para gestionar tu suscripción.
+Si compras Aulia Pro o una ruta única, el pago se procesa a través de **Flow.cl**. Aulia no almacena los datos completos de tu tarjeta; estos son tratados directamente por el procesador de pagos. Conservamos un identificador de la transacción, el estado del pago, el monto y la moneda para gestionar tus compras.
 
 ### 3.3. Datos obtenidos de la API de YouTube
 Para cada lección recopilamos y almacenamos temporalmente metadatos públicos de los videos candidatos: el identificador del video de YouTube, el título, el nombre del canal, el idioma del audio, la duración y si tiene subtítulos. Estos datos provienen exclusivamente de la API oficial de YouTube; **no hacemos scraping** de YouTube ni de ningún otro sitio.
@@ -60,7 +60,7 @@ Usamos la información para:
 - Crear, personalizar y entregar tus rutas de aprendizaje (incluido seleccionar los videos de YouTube más relevantes para cada paso).
 - Operar el tutor de IA y corregir tus pruebas.
 - Registrar y mostrar tu progreso.
-- Gestionar tu cuenta, tu suscripción y tus pagos.
+- Gestionar tu cuenta y tus compras.
 - Mantener la seguridad, prevenir abusos y cumplir obligaciones legales.
 - Mejorar el Servicio.
 
@@ -106,7 +106,7 @@ Dependiendo de tu jurisdicción, tienes derecho a:
 - **Exportar** tus datos.
 - **Oponerte o limitar** ciertos tratamientos.
 
-Para ejercer cualquiera de estos derechos, escríbenos a **igblancora@gmail.com**. Responderemos dentro de los plazos que exija la ley aplicable. Al eliminar tu cuenta, borramos tus rutas, tu progreso, tus conversaciones con el tutor y tus datos de perfil.
+Para ejercer cualquiera de estos derechos, escríbenos a **hola@aulia.ai**. Responderemos dentro de los plazos que exija la ley aplicable. Al eliminar tu cuenta, borramos tus rutas, tu progreso, tus conversaciones con el tutor y tus datos de perfil.
 
 ### Usuarios de la Unión Europea
 Si accedes al Servicio desde la Unión Europea, cumplimos con la **Política de Consentimiento de Usuarios de la UE de Google** (https://www.google.com/about/company/user-consent-policy.html) en relación con el contenido y los reproductores de YouTube, y con el RGPD respecto del tratamiento de tus datos personales. La base legal de nuestro tratamiento es la ejecución del contrato (prestarte el Servicio), tu consentimiento y nuestro interés legítimo en operar y mejorar la plataforma.
@@ -139,7 +139,7 @@ Podemos actualizar esta Política de Privacidad. Publicaremos la versión vigent
 
 ## 12. Contacto
 
-¿Preguntas sobre privacidad? Escríbenos a **igblancora@gmail.com**.
+¿Preguntas sobre privacidad? Escríbenos a **hola@aulia.ai**.
 `;
 
 export const TERMS_MD = `# Términos y Condiciones de Aulia
@@ -152,7 +152,7 @@ Bienvenido a Aulia. Estos Términos y Condiciones ("Términos") regulan el uso d
 
 ## 1. Qué es Aulia
 
-Aulia es una plataforma educativa que utiliza inteligencia artificial para crear **rutas de aprendizaje personalizadas**: módulos paso a paso, lecciones, pruebas, un tutor de IA y videos educativos gratuitos curados desde YouTube para cada paso de tu ruta.
+Aulia es una plataforma educativa que utiliza inteligencia artificial para crear **rutas de aprendizaje personalizadas**: módulos paso a paso, lecciones, pruebas, un tutor de IA y videos públicos de YouTube curados para cada paso de tu ruta.
 
 Aulia es una herramienta de apoyo al aprendizaje. No es una institución educativa acreditada y no otorga títulos oficiales. El contenido generado por IA puede contener errores; úsalo con criterio.
 
@@ -163,7 +163,7 @@ Aulia es una herramienta de apoyo al aprendizaje. No es una institución educati
 - Debes proporcionar información veraz al registrarte y mantenerla actualizada.
 - Eres responsable de la confidencialidad de tus credenciales y de toda actividad en tu cuenta.
 - Debes tener al menos 14 años, o contar con autorización de tu tutor legal si la ley de tu país lo exige.
-- Puedes cerrar tu cuenta en cualquier momento escribiéndonos a igblancora@gmail.com.
+- Puedes cerrar tu cuenta en cualquier momento escribiéndonos a hola@aulia.ai.
 
 ---
 
@@ -179,10 +179,11 @@ No descargamos, redistribuimos ni modificamos el contenido audiovisual de YouTub
 
 ## 4. Planes, precios y pagos
 
-- Aulia ofrece un plan **Gratis**, un plan **Pro** (suscripción mensual) y la compra de **rutas únicas**.
-- Los pagos se procesan a través de **Flow.cl**. Los precios se muestran en la moneda indicada en el Servicio e incluyen los impuestos cuando corresponda.
-- Las suscripciones se renuevan automáticamente hasta que las canceles. Puedes cancelar en cualquier momento; el acceso Pro continúa hasta el final del período ya pagado.
-- Salvo que la ley aplicable disponga lo contrario, los pagos ya realizados no son reembolsables. Para consultas de facturación, escríbenos a igblancora@gmail.com.
+- Aulia ofrece dos formas de compra: la **ruta única** ($9.990 CLP, pago único — la ruta queda tuya para siempre) y **Aulia Pro** ($24.990 CLP por 30 días de acceso).
+- **Aulia Pro no se renueva automáticamente.** Pagas 30 días y, cuando estén por terminar, te avisamos para que decidas si renuevas. La renovación es manual: si renuevas antes de que venza tu período, los días se suman a los que te quedan. No hay cobros automáticos ni permanencia.
+- Los pagos se procesan a través de **Flow.cl**. Los precios se muestran en pesos chilenos (CLP) e incluyen los impuestos cuando corresponda.
+- **Garantía de 7 días:** si dentro de los 7 días siguientes a tu compra decides que Aulia no es para ti, escríbenos a hola@aulia.ai y te devolvemos el 100% de lo pagado.
+- Para consultas de facturación, escríbenos a hola@aulia.ai.
 
 ---
 
@@ -246,5 +247,5 @@ Podemos actualizar estos Términos. Publicaremos la versión vigente en esta pá
 
 ## 13. Contacto
 
-Para cualquier consulta sobre estos Términos, escríbenos a **igblancora@gmail.com**.
+Para cualquier consulta sobre estos Términos, escríbenos a **hola@aulia.ai**.
 `;

@@ -67,65 +67,86 @@ function validateAiContent(
   // Sin quizzes aprobados, no puede haber menciones a quizzes.
   if (!payload.quizzesPassed) {
     const all = `${content.intro} ${content.bullets.join(" ")}`.toLowerCase();
-    if (all.includes("quiz") || all.includes("cuestionario")) return false;
+    // \b evita falsos positivos como "quizás"; "cuestionario" va aparte.
+    if (/\bquiz(z?es)?\b/i.test(all) || all.includes("cuestionario")) return false;
   }
   return true;
 }
 
-/** Contenido determinista (fallback seguro y para tipos sin IA). */
+/**
+ * Contenido determinista (fallback seguro y para tipos sin IA).
+ * Devuelve null para los tipos SIN plantilla: el caller hace skip con log —
+ * jamás un fallback genérico (eso producía «Completaste "undefined"»).
+ */
 function deterministicContent(
   type: OutboxRow["type"],
   p: ProgressEmailPayload,
-): EmailContent {
-  if (type === "module_ready") {
-    return {
-      subject: `Ya puedes empezar: ${p.moduleTitle}`,
-      intro: `El módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}" quedó listo. Tu siguiente paso te espera.`,
-      bullets: (p.lessonTitles ?? []).slice(0, 5),
-      cta: "Abrir el módulo",
-    };
+): EmailContent | null {
+  switch (type) {
+    case "module_ready":
+      return {
+        subject: `Ya puedes empezar: ${p.moduleTitle}`,
+        intro: `El módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}" quedó listo. Tu siguiente paso te espera.`,
+        bullets: (p.lessonTitles ?? []).slice(0, 5),
+        cta: "Abrir el módulo",
+      };
+    case "module_learned":
+      return {
+        subject: `🏁 Completaste "${p.moduleTitle}"`,
+        intro: `Cerraste el módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}". Esto fue lo que viste:`,
+        bullets: (p.lessonTitles ?? []).slice(0, 5),
+        cta: "Seguir con mi ruta",
+      };
+    case "path_completed":
+      return {
+        subject: `🏆 Completaste tu ruta: ${p.pathTitle}`,
+        intro: `Terminaste todas las lecciones de "${p.pathTitle}". Esto es constancia de verdad — felicitaciones.`,
+        bullets: (p.lessonTitles ?? []).slice(0, 5),
+        cta: "Ver mi ruta completa",
+      };
+    case "class_summary":
+      // moduleTitle = nombre del profesor; lessonTitles = resumen + tareas.
+      return {
+        subject: `Tu clase con ${p.moduleTitle ?? "tu profesor"}: resumen y tareas`,
+        intro: `¡Buena clase! Esto fue lo que trabajaron en "${p.pathTitle}" y lo que tu profesor te dejó para seguir avanzando:`,
+        bullets: (p.lessonTitles ?? []).slice(0, 8),
+        cta: "Continuar mi ruta",
+      };
+    case "class_reminder":
+      return {
+        subject: `Recordatorio: tu clase de "${p.pathTitle}" se acerca`,
+        intro: `Tu profesor te espera. Entra unos minutos antes y ten a mano tus dudas del módulo.`,
+        bullets: (p.lessonTitles ?? []).slice(0, 4),
+        cta: "Ir a mi ruta",
+      };
+    // TODO: el correo de bienvenida aún no existe (2 de 3 de la trilogía);
+    // cuando se escriba su plantilla, este case deja de devolver null.
+    case "welcome":
+    case "streak_at_risk":
+    case "weekly_recap":
+    case "reengagement":
+      return null;
+    default:
+      return null;
   }
-  if (type === "path_completed") {
-    return {
-      subject: `🏆 Completaste tu ruta: ${p.pathTitle}`,
-      intro: `Terminaste todas las lecciones de "${p.pathTitle}". Esto es constancia de verdad — felicitaciones.`,
-      bullets: (p.lessonTitles ?? []).slice(0, 5),
-      cta: "Ver mi ruta completa",
-    };
-  }
-  if (type === "class_summary") {
-    // moduleTitle = nombre del profesor; lessonTitles = resumen + tareas (📝).
-    return {
-      subject: `Tu clase con ${p.moduleTitle ?? "tu profesor"}: resumen y tareas`,
-      intro: `¡Buena clase! Esto fue lo que trabajaron en "${p.pathTitle}" y lo que tu profesor te dejó para seguir avanzando:`,
-      bullets: (p.lessonTitles ?? []).slice(0, 8),
-      cta: "Continuar mi ruta",
-    };
-  }
-  if (type === "class_reminder") {
-    return {
-      subject: `Recordatorio: tu clase de "${p.pathTitle}" se acerca`,
-      intro: `Tu profesor te espera. Entra unos minutos antes y ten a mano tus dudas del módulo.`,
-      bullets: (p.lessonTitles ?? []).slice(0, 4),
-      cta: "Ir a mi ruta",
-    };
-  }
-  // module_learned y demás
-  return {
-    subject: `🏁 Completaste "${p.moduleTitle}"`,
-    intro: `Cerraste el módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}". Esto fue lo que viste:`,
-    bullets: (p.lessonTitles ?? []).slice(0, 5),
-    cta: "Seguir con mi ruta",
-  };
 }
 
+/** Etiquetas del badge del correo (sin emojis: regla de marca — gesto = texto). */
 const BADGES: Partial<Record<OutboxRow["type"], string>> = {
-  module_ready: "✨ Nuevo módulo disponible",
-  module_learned: "🏁 Módulo completado",
-  path_completed: "🏆 Ruta completada",
-  class_summary: "🎙️ Tu clase en vivo",
-  class_reminder: "📅 Clase agendada",
+  module_ready: "Nuevo módulo disponible",
+  module_learned: "Módulo completado",
+  path_completed: "Ruta completada ✺",
+  class_summary: "Tu clase en vivo",
+  class_reminder: "Clase agendada",
 };
+
+/** Preview del inbox: corta en el último espacio antes del límite, con «…». */
+function toPreview(intro: string, max = 120): string {
+  if (intro.length <= max) return intro;
+  const cut = intro.slice(0, max);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`;
+}
 
 export async function processOutboxEmail(outboxId: string): Promise<string> {
   // 1) Claim atómico: procesable si está pending, falló antes (reintento de
@@ -204,9 +225,15 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
     }
 
     // 4) Contenido: IA con grounding para hitos de aprendizaje; determinista
-    //    para anuncios. SIEMPRE con fallback determinista.
+    //    para anuncios. SIEMPRE con fallback determinista. Tipos sin plantilla
+    //    → skip explícito (jamás el fallback genérico).
     const payload = (row.payload ?? {}) as ProgressEmailPayload;
-    let content = deterministicContent(row.type, payload);
+    const deterministic = deterministicContent(row.type, payload);
+    if (!deterministic) {
+      console.warn(`[email] tipo "${row.type}" sin plantilla — skip (outbox ${outboxId})`);
+      return skip(outboxId, `tipo "${row.type}" sin plantilla determinista`);
+    }
+    let content = deterministic;
     if (
       (row.type === "module_learned" || row.type === "path_completed") &&
       (payload.lessonTitles?.length ?? 0) > 0
@@ -242,9 +269,10 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
 
     const html = await render(
       ProgressEmail({
-        preview: content.intro.slice(0, 120),
+        preview: toPreview(content.intro),
         badge: BADGES[row.type],
-        heading: content.subject.replace(/^([🏁🏆✨🎉]\s*)+/u, ""),
+        // El asunto puede traer emoji (inbox); el heading del cuerpo no.
+        heading: content.subject.replace(/^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s]+/u, ""),
         intro: content.intro,
         bullets: content.bullets,
         bulletsTitle:

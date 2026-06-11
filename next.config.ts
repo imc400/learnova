@@ -12,6 +12,13 @@ const nextConfig: NextConfig = {
   },
   // Paquetes que solo deben correr en el servidor (SDKs pesados).
   serverExternalPackages: ["@anthropic-ai/sdk", "postgres"],
+  async redirects() {
+    return [
+      // La landing de ads vieja se reemplaza por la home; los ads apuntan a
+      // /empieza/ruta (el wizard sigue vivo). permanent:false por si se revierte.
+      { source: "/empieza", destination: "/", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -30,6 +30,8 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Kraft de cuaderno: tiñe la barra del navegador del mismo papel del fondo.
+  themeColor: "#f1e8d3",
 };
 
 export const metadata: Metadata = {

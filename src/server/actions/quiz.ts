@@ -89,6 +89,29 @@ export interface QuestionResult {
   correct: boolean;
   correctOptionIds: string[];
   explanation: string;
+  /** Segundo del video donde se responde la pregunta (grounding del digest).
+   *  Null si la pregunta se ancla solo al texto de la lección. */
+  timestampSeconds: number | null;
+}
+
+/**
+ * El grounding validado se persiste DENTRO de la explicación como sufijo
+ * "⏱ El video lo explica en M:SS." (ver saveQuizData en lib/generation/run.ts).
+ * Aquí se separa: el timestamp viaja estructurado al cliente (chip que hace
+ * seek del video) y la explicación queda limpia. Plomería pura, sin IA.
+ */
+const GROUNDING_SUFFIX_RE = /\s*⏱\s*El video lo explica en (\d+):(\d{1,2})\.?\s*$/;
+
+function splitGrounding(explanation: string): {
+  text: string;
+  timestampSeconds: number | null;
+} {
+  const m = explanation.match(GROUNDING_SUFFIX_RE);
+  if (!m) return { text: explanation, timestampSeconds: null };
+  return {
+    text: explanation.slice(0, m.index).trim(),
+    timestampSeconds: Number(m[1]) * 60 + Number(m[2]),
+  };
 }
 export interface GradeResult {
   score: number;
@@ -188,11 +211,13 @@ export async function gradeQuizAction(
         ? (selected[0] ?? "").trim().length >= 20
         : sameSet(selected, correctIds);
     if (correct && q.type !== "open") correctClosed++;
+    const grounded = splitGrounding(q.explanation ?? "");
     return {
       questionId: q.id,
       correct,
       correctOptionIds: correctIds,
-      explanation: q.explanation ?? "",
+      explanation: grounded.text,
+      timestampSeconds: grounded.timestampSeconds,
     };
   });
 

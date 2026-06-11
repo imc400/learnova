@@ -1,6 +1,6 @@
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import {
-  ArrowRight,
   Plus,
   Sparkles,
   Trophy,
@@ -18,20 +18,29 @@ import { getEntitlement } from "@/lib/subscription";
 import { listUserPaths } from "@/server/queries/paths";
 import { getUserAchievements } from "@/server/queries/gamification";
 import { LearningProgress } from "@/components/app/learning-progress";
+import { PageHeader } from "@/components/app/brand/page-header";
+import { EmptyState } from "@/components/app/brand/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ArrowDoodle, Check as CheckMark } from "@/components/marketing/landing/icons";
+import { env } from "@/lib/env";
 import type { pathStatus } from "@/db/schema";
 
 export const metadata = { title: "Mis rutas" };
 
 const STATUS: Record<
   (typeof pathStatus.enumValues)[number],
-  { label: string; variant: "default" | "primary" | "accent" | "outline" }
+  {
+    label: string;
+    variant: "default" | "primary" | "accent" | "outline";
+    className?: string;
+  }
 > = {
   draft: { label: "Borrador", variant: "outline" },
   generating: { label: "Generando…", variant: "accent" },
   ready: { label: "Lista", variant: "primary" },
-  failed: { label: "Falló", variant: "default" },
+  // El lápiz rojo corrige, no se esconde: failed deja de ser kraft invisible.
+  failed: { label: "Algo falló", variant: "default", className: "bg-destructive/10 text-destructive" },
 };
 
 // Mapa de íconos del catálogo de logros (achievements.icon → componente).
@@ -87,22 +96,25 @@ export default async function DashboardPage() {
     (a) => a.kind === "deterministic" || a.unlockedAt,
   );
   const unlocked = visibleAchievements.filter((a) => a.unlockedAt);
+  const porDesbloquear = visibleAchievements.length - unlocked.length;
   const hasHiddenSurprises = achievements.some(
     (a) => a.kind === "surprise" && !a.unlockedAt,
   );
 
   return (
     <div className="flex flex-col gap-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight">
-            Mis rutas
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Tus caminos de aprendizaje a medida.
-          </p>
-        </div>
-        <Button asChild>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <PageHeader
+          className="mb-0"
+          nota="tu cuaderno ✺"
+          titulo={
+            <>
+              Tus rutas, <span className="ink-hl">a tu medida</span>
+            </>
+          }
+          subtitulo="Retoma donde quedaste. Tu avance mide dominio, no minutos."
+        />
+        <Button asChild className="mt-1">
           <Link href="/app/crear">
             <Plus className="size-4" /> Crear ruta
           </Link>
@@ -112,14 +124,15 @@ export default async function DashboardPage() {
       {/* Estímulo Pro: visible para básicos con al menos una ruta (los que
           ya probaron el producto — el mejor momento para el upgrade). */}
       {!isPro && paths.length > 0 && (
-        <div className="flex flex-col items-start justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center">
+        <div className="relative mt-2 flex flex-col items-start justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center">
+          <span className="absolute -top-4 right-5 rotate-[3deg]">
+            <span className="tab-note">sin cobro automático ✺</span>
+          </span>
           <div>
-            <p className="font-display text-sm font-bold">
-              🔥 ¿Vas en serio? Aulia Pro
-            </p>
+            <p className="font-display text-sm font-bold">¿Vas en serio? Aulia Pro</p>
             <p className="text-sm text-muted-foreground">
-              2 rutas nuevas al mes + clases en vivo con todos tus profesores
-              cuando quieras.
+              {env.PRO_ROUTES_PER_MONTH} rutas nuevas al mes + 120 minutos al mes
+              de clases en vivo, con todos tus profesores.
             </p>
           </div>
           <Button asChild size="sm" variant="primary">
@@ -129,26 +142,22 @@ export default async function DashboardPage() {
       )}
 
       {paths.length === 0 ? (
-        <div className="grid place-items-center rounded-xl border border-dashed border-border bg-card py-20 text-center">
-          <Sparkles className="size-8 text-primary" />
-          <h2 className="mt-4 font-display text-lg font-semibold">
-            Aún no tienes rutas
-          </h2>
-          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Dinos qué quieres aprender y la IA te arma una ruta completa a tu medida.
-          </p>
-          <Button asChild className="mt-6">
-            <Link href="/app/crear">
-              Crear mi primera ruta <ArrowRight className="size-4" />
-            </Link>
-          </Button>
-        </div>
+        <EmptyState
+          nota="tu cuaderno está en blanco ✺"
+          titulo="Todavía no tienes rutas"
+          descripcion="Dinos qué quieres aprender y la IA diseña una ruta solo para ti. Ves tu temario completo antes de pagar."
+          cta={{ href: "/app/crear", label: "Diseñar mi ruta" }}
+        />
       ) : (
         <>
         {/* Caminos: cadenas de rutas conectadas (creadas desde "Siguiente paso") */}
         {chains.length > 0 && (
           <section className="flex flex-col gap-4">
-            {chains.map((chain) => (
+            {chains.map((chain) => {
+              const last = chain[chain.length - 1]!;
+              const chainDone =
+                last.lessonCount > 0 && last.completedLessons === last.lessonCount;
+              return (
               <div key={chain[0]!.id}>
                 <h2 className="flex items-center gap-2 font-display text-sm font-semibold text-primary">
                   <Route className="size-4" /> Camino de {chain[0]!.topic}
@@ -156,22 +165,29 @@ export default async function DashboardPage() {
                     · {chain.length} rutas
                   </span>
                 </h2>
-                <div className="mt-3 flex items-stretch gap-2 overflow-x-auto pb-1">
+                {/* Mobile: apilado vertical (flecha apunta abajo). Desktop:
+                    fila con scroll y flecha girada hacia la derecha. */}
+                <div className="mt-3 flex flex-col items-stretch gap-2 pb-1 sm:flex-row sm:overflow-x-auto">
                   {chain.map((p, i) => {
                     const done =
                       p.lessonCount > 0 && p.completedLessons === p.lessonCount;
                     return (
-                      <div key={p.id} className="flex items-center gap-2">
+                      <div key={p.id} className="flex flex-col items-center gap-2 sm:flex-row">
                         <Link
                           href={`/app/rutas/${p.id}`}
-                          className={`flex w-56 shrink-0 flex-col rounded-lg border p-4 shadow-soft transition-shadow hover:shadow-lift ${
+                          className={`flex w-full shrink-0 flex-col rounded-lg border p-4 shadow-soft transition-shadow hover:shadow-lift sm:w-56 ${
                             done
                               ? "border-primary/40 bg-primary/5"
                               : "border-border bg-card"
                           }`}
                         >
-                          <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                            Etapa {i + 1} {done && "· ✓ completada"}
+                          <span className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                            Etapa {i + 1}
+                            {done && (
+                              <Badge variant="accent" className="normal-case tracking-normal">
+                                <CheckMark size={12} /> completada
+                              </Badge>
+                            )}
                           </span>
                           <span className="mt-1 line-clamp-2 font-display text-sm font-semibold leading-tight">
                             {p.title}
@@ -187,14 +203,35 @@ export default async function DashboardPage() {
                           )}
                         </Link>
                         {i < chain.length - 1 && (
-                          <ArrowRight className="size-4 shrink-0 text-primary" />
+                          <ArrowDoodle
+                            size={28}
+                            className="shrink-0 text-primary sm:-rotate-90"
+                          />
                         )}
                       </div>
                     );
                   })}
+                  {/* Camino completo → la siguiente etapa se planifica contigo */}
+                  {chainDone && (
+                    <div className="flex flex-col items-center gap-2 sm:flex-row">
+                      <ArrowDoodle
+                        size={28}
+                        className="shrink-0 text-primary sm:-rotate-90"
+                      />
+                      <Link
+                        href={`/app/rutas/${last.id}`}
+                        className="flex w-full shrink-0 flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-card/60 p-4 text-center sm:w-56"
+                      >
+                        <span className="hand">
+                          Etapa {chain.length + 1} · se diseñará contigo ✺
+                        </span>
+                      </Link>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </section>
         )}
 
@@ -202,21 +239,24 @@ export default async function DashboardPage() {
           {standalone.map((p) => {
             const s = STATUS[p.status];
             const remaining = p.lessonCount - p.completedLessons;
-            return (
-              <Link
-                key={p.id}
-                href={`/app/rutas/${p.id}`}
-                className="group flex flex-col rounded-lg border border-border bg-card p-5 shadow-soft transition-shadow hover:shadow-lift"
-              >
+            const cardBody = (
+              <>
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="font-display font-semibold leading-tight">
                     {p.title}
                   </h3>
-                  <Badge variant={s.variant}>{s.label}</Badge>
+                  <Badge variant={s.variant} className={s.className}>{s.label}</Badge>
                 </div>
-                <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
-                  {p.goal}
-                </p>
+                {p.status === "failed" ? (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Algo falló al generar — escríbenos a hola@aulia.ai y lo
+                    resolvemos.
+                  </p>
+                ) : (
+                  <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">
+                    {p.goal}
+                  </p>
+                )}
                 {p.lessonCount > 0 && (
                   <LearningProgress
                     done={p.completedLessons}
@@ -234,6 +274,30 @@ export default async function DashboardPage() {
                     </span>
                   )}
                 </div>
+              </>
+            );
+            // Failed: card sin link (no hay lección a la que ir) + salida
+            // accionable por correo. Los anchors no se pueden anidar.
+            if (p.status === "failed") {
+              return (
+                <div
+                  key={p.id}
+                  className="flex flex-col rounded-lg border border-destructive/30 bg-card p-5 shadow-soft"
+                >
+                  {cardBody}
+                  <Button asChild size="sm" variant="outline" className="mt-4 self-start">
+                    <a href="mailto:hola@aulia.ai">Escríbenos y lo resolvemos</a>
+                  </Button>
+                </div>
+              );
+            }
+            return (
+              <Link
+                key={p.id}
+                href={`/app/rutas/${p.id}`}
+                className="group flex flex-col rounded-lg border border-border bg-card p-5 shadow-soft transition-shadow hover:shadow-lift"
+              >
+                {cardBody}
               </Link>
             );
           })}
@@ -248,29 +312,40 @@ export default async function DashboardPage() {
             Logros
           </h2>
           <p className="text-sm text-muted-foreground">
-            {unlocked.length} de {visibleAchievements.length} desbloqueados
-            {hasHiddenSurprises && " · hay logros secretos por descubrir 🤫"}
+            {porDesbloquear > 0
+              ? `Hay ${porDesbloquear} ${porDesbloquear === 1 ? "logro" : "logros"} por desbloquear`
+              : `${unlocked.length} de ${visibleAchievements.length} desbloqueados`}
+            {hasHiddenSurprises && " · y hay secretos por descubrir"}
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
-            {visibleAchievements
-              .map((a) => {
-                const Icon = ACHIEVEMENT_ICONS[a.icon] ?? Trophy;
-                const isUnlocked = !!a.unlockedAt;
-                return (
-                  <div
-                    key={a.id}
-                    title={`${a.description}${a.xpReward ? ` · +${a.xpReward} XP` : ""}`}
-                    className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm transition-colors ${
-                      isUnlocked
-                        ? "border-primary/40 bg-primary/10 text-primary"
-                        : "border-border bg-card text-muted-foreground opacity-60"
-                    }`}
-                  >
-                    <Icon className="size-4" />
-                    <span className="font-medium">{a.title}</span>
-                  </div>
-                );
-              })}
+            {visibleAchievements.map((a, i) => {
+              const Icon = ACHIEVEMENT_ICONS[a.icon] ?? Trophy;
+              const isUnlocked = !!a.unlockedAt;
+              return (
+                <div
+                  key={a.id}
+                  className={`max-w-72 items-start gap-2.5 rounded-lg border px-3.5 py-2.5 text-sm ${
+                    isUnlocked
+                      ? "sticker-pop border-accent/40 bg-highlight-soft"
+                      : "flex border-border bg-card text-muted-foreground opacity-60"
+                  }`}
+                  style={
+                    isUnlocked
+                      ? ({ "--pop-rotate": i % 2 ? "2deg" : "-2deg" } as CSSProperties)
+                      : undefined
+                  }
+                >
+                  <Icon className="mt-0.5 size-4 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block font-medium leading-tight">{a.title}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">
+                      {a.description}
+                      {a.xpReward ? ` · +${a.xpReward} XP` : ""}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
       )}

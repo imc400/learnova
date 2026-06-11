@@ -7,7 +7,11 @@ import {
   Receipt,
   Sparkles,
   CheckCircle2,
+  Clock,
+  AlertCircle,
+  RotateCcw,
   ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
@@ -15,21 +19,62 @@ import { profiles, subscriptions, pathPurchases, learningPaths } from "@/db/sche
 import { updatePersonalDataAction } from "@/server/actions/profile";
 import { cancelProAction, subscribeProAction } from "@/server/actions/subscription";
 import { SubmitButton } from "@/components/app/submit-button";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { formatPrice } from "@/lib/utils";
+import { env } from "@/lib/env";
 
 export const metadata = { title: "Mi perfil" };
 export const dynamic = "force-dynamic";
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("es-CL", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
+  // Formato es-CL corto de marca: "10 jun 2026".
+  return new Date(d)
+    .toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" })
+    .replace(/\.,?/g, "")
+    .replace(" de ", " ");
 }
+
+/* Estado real de cada cobro — pending/failed/refunded jamás se pintan
+   como exitosos. Compuesto sobre Badge vía className (API congelada). */
+type PurchaseStatusCfg = {
+  label: string;
+  icon: LucideIcon;
+  iconCls: string;
+  badgeCls: string;
+};
+const PURCHASE_STATUS: Partial<Record<string, PurchaseStatusCfg>> & {
+  pending: PurchaseStatusCfg;
+} = {
+  paid: {
+    label: "Pagada",
+    icon: CheckCircle2,
+    iconCls: "text-primary",
+    badgeCls: "bg-primary/10 text-primary",
+  },
+  pending: {
+    label: "En proceso",
+    icon: Clock,
+    iconCls: "text-muted-foreground",
+    badgeCls: "bg-muted text-muted-foreground",
+  },
+  failed: {
+    label: "No se cobró",
+    icon: AlertCircle,
+    iconCls: "text-destructive",
+    badgeCls: "bg-destructive/10 text-destructive",
+  },
+  refunded: {
+    label: "Reembolsada",
+    icon: RotateCcw,
+    iconCls: "text-muted-foreground",
+    badgeCls: "border border-border bg-card text-muted-foreground",
+  },
+};
 
 export default async function PerfilPage({
   searchParams,
@@ -75,39 +120,48 @@ export default async function PerfilPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <h1 className="font-display text-2xl font-bold tracking-tight">Mi perfil</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Tus datos, tu plan y tus compras — todo en un lugar.
-      </p>
+      {/* Header SIN tab-note: el único de la pantalla vive en la card
+          "Tu plan" (excepción justificada — es el sello de la promesa). */}
+      <header className="mb-2">
+        <h1 className="font-display text-3xl text-balance sm:text-4xl">Mi perfil</h1>
+        <p className="mt-2 max-w-[58ch] text-muted-foreground">
+          Tus datos, tu plan y tus compras — todo en un lugar.
+        </p>
+      </header>
 
       {sp.ok === "datos" && (
-        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary">
-          ✓ Datos guardados.
-        </p>
+        <NotaBanner tone="exito" className="mt-4">
+          Datos guardados.
+        </NotaBanner>
       )}
       {sp.error === "telefono" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive">
-          Revisa tu WhatsApp: 8 a 15 dígitos (ej: +56 9 1234 5678).
-        </p>
+        <NotaBanner tone="error" titulo="Ese WhatsApp no calza" className="mt-4">
+          No guardamos el cambio. Usa 8 a 15 dígitos (ej: +56 9 1234 5678) y
+          vuelve a intentar.
+        </NotaBanner>
       )}
       {sp.ok === "pro" && (
-        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary">
-          🎉 ¡Bienvenido/a a Aulia Pro! Tu suscripción está activa.
-        </p>
+        <NotaBanner tone="exito" titulo="Tu Pro está activo por 30 días" className="mt-4">
+          Sin cobro automático: te avisamos para renovar.
+        </NotaBanner>
       )}
       {sp.ok === "cancelada" && (
-        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-sm font-medium">
-          Tu suscripción se canceló — conservas Pro hasta el fin del período
-          pagado. Te esperamos de vuelta. ✺
-        </p>
+        <NotaBanner tone="aviso" className="mt-4">
+          Cancelaste la renovación — conservas Pro hasta el fin del período
+          pagado. Te esperamos de vuelta.
+        </NotaBanner>
       )}
       {sp.error === "cancelacion" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-sm font-medium text-destructive">
-          No pudimos cancelar. Escríbenos a hola@aulia.ai y lo resolvemos al tiro.
-        </p>
+        <NotaBanner tone="error" titulo="No pudimos cancelar" className="mt-4">
+          Tu plan sigue igual, no cambió nada. Escríbenos a{" "}
+          <a href="mailto:hola@aulia.ai" className="font-medium text-foreground hover:underline">
+            hola@aulia.ai
+          </a>{" "}
+          y lo resolvemos al tiro.
+        </NotaBanner>
       )}
 
-      {/* Datos personales */}
+      {/* Datos personales — zona de sobriedad: cero gestos. */}
       <section className="mt-6 rounded-xl border border-border bg-card p-5">
         <h2 className="flex items-center gap-2 font-display text-base font-semibold">
           <User className="size-4 text-primary" /> Datos personales
@@ -138,8 +192,16 @@ export default async function PerfilPage({
         </form>
       </section>
 
-      {/* Suscripción */}
-      <section className="mt-5 rounded-xl border border-border bg-card p-5">
+      {/* Tu plan — el tab-note de la esquina es el sello de la promesa
+          (frase idéntica a precios.tsx) y el ÚNICO de la pantalla. */}
+      <section className="relative mt-8 rounded-xl border border-border bg-card p-5">
+        {/* Oculto en la rama de suscripción automática (PRO_SUBSCRIPTION_ENABLED,
+            task #45): ahí el claim dejaría de ser cierto. */}
+        {(!isPro || esManual) && (
+          <span className="absolute -top-4 right-5 rotate-[2deg]">
+            <span className="tab-note">sin cobro automático ✺</span>
+          </span>
+        )}
         <h2 className="flex items-center gap-2 font-display text-base font-semibold">
           <CreditCard className="size-4 text-primary" /> Tu plan
         </h2>
@@ -154,7 +216,8 @@ export default async function PerfilPage({
             </p>
             <form action={subscribeProAction.bind(null, null)} className="mt-3">
               <SubmitButton size="sm" pendingText="Conectando con Flow…">
-                <Sparkles className="size-4" /> Renovar 30 días más
+                <Sparkles className="size-4" /> Renovar 30 días más ·{" "}
+                {formatPrice(env.PRICE_PRO_CLP, "CLP")}
               </SubmitButton>
             </form>
             <p className="mt-1.5 text-xs text-muted-foreground">
@@ -163,13 +226,15 @@ export default async function PerfilPage({
             </p>
           </div>
         ) : isPro ? (
+          /* Rama de suscripción automática — solo alcanzable con
+             PRO_SUBSCRIPTION_ENABLED (contrato PAT pendiente, task #45). */
           <div className="mt-3 flex items-start justify-between gap-3">
             <div>
               <Badge variant="primary">
                 <Sparkles className="size-3.5" /> Aulia Pro
               </Badge>
               <p className="mt-2 text-sm text-muted-foreground">
-                Suscripción activa
+                Pro activo
                 {sub?.currentPeriodEnd
                   ? ` · próximo cobro el ${fmtDate(sub.currentPeriodEnd)}`
                   : ""}
@@ -188,7 +253,7 @@ export default async function PerfilPage({
                     pendingText="Cancelando…"
                     className="text-muted-foreground"
                   >
-                    Cancelar suscripción
+                    Cancelar renovación
                   </SubmitButton>
                 </form>
               )}
@@ -200,18 +265,17 @@ export default async function PerfilPage({
               Plan <span className="font-semibold">por ruta</span>: pagas una
               vez por cada ruta y es tuya para siempre.
             </p>
-            <Link
-              href="/app/planes"
-              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/90"
-            >
-              <Sparkles className="size-4" /> Conocer Aulia Pro
-              <ChevronRight className="size-4" />
-            </Link>
+            <Button asChild size="sm" className="mt-3">
+              <Link href="/app/planes">
+                <Sparkles className="size-4" /> Conocer Aulia Pro
+                <ChevronRight className="size-4" />
+              </Link>
+            </Button>
           </div>
         )}
       </section>
 
-      {/* Compras */}
+      {/* Compras — cada cobro con su estado real. */}
       <section className="mt-5 rounded-xl border border-border bg-card p-5">
         <h2 className="flex items-center gap-2 font-display text-base font-semibold">
           <Receipt className="size-4 text-primary" /> Tus compras
@@ -226,33 +290,38 @@ export default async function PerfilPage({
           </p>
         ) : (
           <ul className="mt-3 divide-y divide-border">
-            {purchases.map((p) => (
-              <li key={p.id} className="flex items-center gap-3 py-3">
-                <CheckCircle2 className="size-4 shrink-0 text-primary" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
-                    {p.kind === "pro_month"
-                      ? "Aulia Pro — 30 días"
-                      : p.pathTitle ?? "Ruta de aprendizaje"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {fmtDate(p.createdAt)} ·{" "}
-                    {p.provider === "mercadopago" ? "Mercado Pago" : p.provider === "flow" ? "Flow" : p.provider}
-                  </p>
-                </div>
-                <span className="shrink-0 text-sm font-semibold tabular-nums">
-                  ${Number(p.amount).toLocaleString("es-CL")} {p.currency}
-                </span>
-                {p.pathId && (
-                  <Link
-                    href={`/app/rutas/${p.pathId}`}
-                    className="shrink-0 text-xs font-medium text-primary hover:underline"
-                  >
-                    Ver ruta
-                  </Link>
-                )}
-              </li>
-            ))}
+            {purchases.map((p) => {
+              const st = PURCHASE_STATUS[p.status] ?? PURCHASE_STATUS.pending;
+              const Icono = st.icon;
+              return (
+                <li key={p.id} className="flex items-center gap-3 py-3">
+                  <Icono className={`size-4 shrink-0 ${st.iconCls}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">
+                      {p.kind === "pro_month"
+                        ? "Aulia Pro — 30 días"
+                        : p.pathTitle ?? "Ruta de aprendizaje"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {fmtDate(p.createdAt)} ·{" "}
+                      {p.provider === "mercadopago" ? "Mercado Pago" : p.provider === "flow" ? "Flow" : p.provider}
+                    </p>
+                  </div>
+                  <Badge className={`shrink-0 ${st.badgeCls}`}>{st.label}</Badge>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">
+                    {formatPrice(Number(p.amount), "CLP")}
+                  </span>
+                  {p.pathId && (
+                    <Link
+                      href={`/app/rutas/${p.pathId}`}
+                      className="shrink-0 text-xs font-medium text-primary hover:underline"
+                    >
+                      Ver ruta
+                    </Link>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

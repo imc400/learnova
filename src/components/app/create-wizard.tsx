@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Sparkles, ArrowLeft, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
 import {
   createRouteIntentAction,
   wizardQuestionsAction,
@@ -46,13 +47,35 @@ export function CreateWizard({
   const [answers, setAnswers] = useState<Answers>({});
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [loadingQuestions, startQuestions] = useTransition();
   const [creating, startCreate] = useTransition();
 
+  // Los errores se muestran donde el usuario está mirando (no por redirect,
+  // que borraba el wizard entero): banner inline + scroll hasta él.
+  const errorRef = useRef<HTMLDivElement>(null);
+  const phoneErrorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [error]);
+  useEffect(() => {
+    if (phoneError)
+      phoneErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [phoneError]);
+
   const canContinue = topic.trim().length >= 2;
+  // Misma regla que el servidor (intakeSchema): entero positivo ≤ 80.
+  const hoursNum = weeklyHours.trim() ? Number(weeklyHours) : undefined;
+  const hoursValid =
+    hoursNum === undefined ||
+    (Number.isInteger(hoursNum) && hoursNum >= 1 && hoursNum <= 80);
 
   const goToQuestions = () => {
     if (!canContinue) return;
+    if (!hoursValid) {
+      setError("Las horas por semana deben ser un número entero entre 1 y 80.");
+      return;
+    }
     setError(null);
     startQuestions(async () => {
       try {
@@ -112,8 +135,17 @@ export function CreateWizard({
 
   const submit = () => {
     setError(null);
+    setPhoneError(null);
+    // Validación en cliente ANTES del submit: la server action redirige al
+    // fallar y eso borraba el wizard completo. Misma regla que normalizePhone.
     if (!phoneValid) {
-      setError("Necesitamos tu WhatsApp para avisarte cuando tu ruta esté lista.");
+      setPhoneError(
+        "Revisa tu WhatsApp: debe tener entre 8 y 15 dígitos (ej: +56 9 1234 5678).",
+      );
+      return;
+    }
+    if (!hoursValid) {
+      setError("Las horas por semana deben ser un número entero entre 1 y 80.");
       return;
     }
     // Composición: respuestas → goal / priorExperience. El topic NO se toca.
@@ -156,23 +188,16 @@ export function CreateWizard({
     "h-11 rounded-md border border-input bg-card px-3 text-sm text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
 
   return (
-    <div className="mt-8">
-      {/* Indicador de paso */}
-      <div className="mb-6 flex items-center justify-center gap-2">
-        {[1, 2].map((s) => (
-          <span
-            key={s}
-            className={`h-1.5 rounded-full transition-all duration-300 ${
-              step === s ? "w-8 bg-primary" : "w-4 bg-border"
-            }`}
-          />
-        ))}
-      </div>
+    <div>
+      {/* Indicador de paso — nota al margen, no control */}
+      <p className="hand mb-5 text-center" aria-label={`Paso ${step} de 2`}>
+        paso {step} de 2 ✺
+      </p>
 
       {error && (
-        <p className="mb-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          {error}
-        </p>
+        <div ref={errorRef} className="mb-4">
+          <NotaBanner tone="error">{error}</NotaBanner>
+        </div>
       )}
 
       {step === 1 ? (
@@ -183,7 +208,7 @@ export function CreateWizard({
               id="topic"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
-              placeholder="Ej: Cocina, Python, Marketing digital, Guitarra…"
+              placeholder="fotografía con celular, excel para mi pyme, guitarra desde cero…"
               autoFocus
             />
           </div>
@@ -295,17 +320,26 @@ export function CreateWizard({
           })}
 
           <div className="flex flex-col gap-2.5">
-            <Label htmlFor="phone">Tu WhatsApp</Label>
+            <Label htmlFor="phone">Tu WhatsApp (obligatorio)</Label>
             <Input
               id="phone"
               type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={(e) => {
+                setPhone(e.target.value);
+                setPhoneError(null);
+              }}
               placeholder="+56 9 1234 5678"
+              aria-invalid={phoneError ? true : undefined}
             />
             <p className="text-xs text-muted-foreground">
-              Te avisamos al correo cuando tu primer módulo esté listo.
+              Solo para avisarte cuando tu ruta esté lista. Nada de spam.
             </p>
+            {phoneError && (
+              <div ref={phoneErrorRef}>
+                <NotaBanner tone="error">{phoneError}</NotaBanner>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3">
@@ -335,6 +369,11 @@ export function CreateWizard({
               )}
             </Button>
           </div>
+          {answeredCount === 0 && (
+            <p className="text-center text-xs font-medium text-muted-foreground">
+              Responde al menos una pregunta para crear tu ruta.
+            </p>
+          )}
           <p className="text-center text-xs text-muted-foreground">
             La IA diseñará tu currículum, generará las lecciones y curará los
             videos. Puede tomar unos minutos.

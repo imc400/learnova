@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
 
 export default function AuthLayout({
@@ -10,9 +11,19 @@ export default function AuthLayout({
       <div className="mb-8">
         <Logo />
       </div>
-      <div className="w-full max-w-sm">{children}</div>
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-soft">
+        {children}
+      </div>
       <p className="mt-8 max-w-sm text-center text-xs text-muted-foreground">
-        Al continuar aceptas nuestros Términos y la Política de Privacidad.
+        Al continuar aceptas nuestros{" "}
+        <Link href="/terminos" className="underline hover:text-foreground">
+          Términos
+        </Link>{" "}
+        y la{" "}
+        <Link href="/privacidad" className="underline hover:text-foreground">
+          Política de Privacidad
+        </Link>
+        .
       </p>
     </main>
   );

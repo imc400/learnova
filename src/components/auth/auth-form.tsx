@@ -8,13 +8,35 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
 
 type Mode = "login" | "signup";
+
+/** Errores de Supabase Auth en es-CL: qué pasó + qué hacer. */
+function mensajeError(err: unknown): string {
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code?: unknown }).code)
+      : "";
+  switch (code) {
+    case "invalid_credentials":
+      return "Ese correo y contraseña no calzan. ¿Lo intentas de nuevo?";
+    case "email_not_confirmed":
+      return "Falta confirmar tu correo — revisa tu bandeja.";
+    case "over_request_rate_limit":
+      return "Demasiados intentos seguidos. Espera un minuto y reintenta.";
+    default:
+      return "No pudimos completar eso. Intenta de nuevo, o escríbenos a hola@aulia.ai y lo vemos contigo.";
+  }
+}
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const params = useSearchParams();
-  const next = params.get("next") ?? "/app";
+  // `next` solo acepta rutas internas (evita open redirect vía //evil.com).
+  const rawNext = params.get("next") ?? "/app";
+  const next =
+    rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/app";
 
   const supabase = createClient();
   const [email, setEmail] = useState("");
@@ -60,7 +82,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         router.refresh();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Ocurrió un error.");
+      setError(mensajeError(err));
     } finally {
       setLoading(false);
     }
@@ -76,7 +98,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
       },
     });
     if (error) {
-      setError(error.message);
+      setError(mensajeError(error));
       setLoading(false);
     }
   }
@@ -153,25 +175,17 @@ export function AuthForm({ mode }: { mode: Mode }) {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
             autoComplete={mode === "signup" ? "new-password" : "current-password"}
-            minLength={8}
+            minLength={mode === "signup" ? 8 : undefined}
             required
           />
         </div>
 
-        {error && (
-          <p className="rounded-sm bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        )}
-        {message && (
-          <p className="rounded-sm bg-primary/10 px-3 py-2 text-sm text-primary">
-            {message}
-          </p>
-        )}
+        {error && <NotaBanner tone="error">{error}</NotaBanner>}
+        {message && <NotaBanner tone="exito">{message}</NotaBanner>}
 
         <Button type="submit" size="lg" disabled={loading}>
           {loading && <Loader2 className="animate-spin" />}
-          {mode === "signup" ? "Crear cuenta gratis" : "Entrar"}
+          {mode === "signup" ? "Crear mi cuenta" : "Entrar"}
         </Button>
       </form>
 
@@ -179,15 +193,21 @@ export function AuthForm({ mode }: { mode: Mode }) {
         {mode === "signup" ? (
           <>
             ¿Ya tienes cuenta?{" "}
-            <Link href="/login" className="font-medium text-primary hover:underline">
+            <Link
+              href={`/login?next=${encodeURIComponent(next)}`}
+              className="font-medium text-primary hover:underline"
+            >
               Inicia sesión
             </Link>
           </>
         ) : (
           <>
             ¿No tienes cuenta?{" "}
-            <Link href="/signup" className="font-medium text-primary hover:underline">
-              Regístrate gratis
+            <Link
+              href={`/signup?next=${encodeURIComponent(next)}`}
+              className="font-medium text-primary hover:underline"
+            >
+              Crea tu cuenta
             </Link>
           </>
         )}

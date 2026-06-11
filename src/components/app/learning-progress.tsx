@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 /**
  * Barra de progreso de APRENDIZAJE (lecciones completadas por el usuario).
  * Distinta del progreso de generación: esta refleja el avance real.
@@ -39,9 +41,10 @@ export function LearningProgress({
         aria-label={`Avance: ${done} de ${total} lecciones completadas`}
         className={`${height} w-full overflow-hidden rounded-full bg-muted`}
       >
+        {/* Avanza "a tics" (receta canónica): transform, no width → no layout. */}
         <div
-          className="h-full rounded-full bg-primary transition-all duration-500"
-          style={{ width: `${Math.min(fill, 100)}%` }}
+          className="progress-fill animate-tick-progress h-full rounded-full bg-primary"
+          style={{ "--progress": Math.min(fill, 100) / 100 } as CSSProperties}
         />
       </div>
     </div>

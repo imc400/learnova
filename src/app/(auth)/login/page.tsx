@@ -8,11 +8,12 @@ export default function LoginPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="text-center">
-        <h1 className="font-display text-2xl font-semibold tracking-tight">
+        <span className="tab-note">de vuelta a clases ✺</span>
+        <h1 className="mt-3 font-display text-2xl font-semibold tracking-tight">
           Bienvenido de vuelta
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Continúa tu ruta de aprendizaje.
+        <p className="hand mt-1 inline-block rotate-[-1deg]">
+          tu cuaderno te espera ✺
         </p>
       </div>
       <Suspense fallback={null}>

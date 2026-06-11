@@ -28,7 +28,7 @@ function page(title: string, body: string, ok: boolean) {
 <div style="font-weight:800;font-size:22px;color:#0E5340;margin-bottom:18px">Aulia</div>
 <h1 style="font-size:22px;margin:0 0 10px">${title}</h1>
 <p style="color:#565C71;line-height:1.5;margin:0 0 24px">${body}</p>
-<a href="${env.NEXT_PUBLIC_SITE_URL ?? "https://aulia.ai"}${ok ? "/app" : ""}" style="background:#0E5340;color:#fff;text-decoration:none;border-radius:999px;padding:12px 26px;font-weight:800;display:inline-block">Volver a Aulia</a>
+<a href="${env.NEXT_PUBLIC_SITE_URL ?? "https://aulia.ai"}${ok ? "/app" : ""}" style="background:#1F7A63;color:#fff;text-decoration:none;border-radius:14px;padding:12px 26px;font-weight:800;display:inline-block">Volver a Aulia</a>
 </div></body></html>`,
     { status: ok ? 200 : 400, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
@@ -40,7 +40,7 @@ export async function GET(req: Request) {
   return ok
     ? page(
         "Listo, no te escribiremos más",
-        "Diste de baja los correos de avance y recordatorios. Puedes reactivarlos cuando quieras desde tu cuenta. Tu progreso sigue intacto.",
+        "Diste de baja los correos de avance y recordatorios. Si te arrepientes, escríbenos a hola@aulia.ai y los reactivamos. Tu progreso sigue intacto.",
         true,
       )
     : page("Enlace inválido", "Este enlace de baja no es válido o ya expiró.", false);

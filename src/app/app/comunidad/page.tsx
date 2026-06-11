@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { CSSProperties } from "react";
 import { Flame, Trophy, BookOpen, Eye, EyeOff, Medal, Star } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
@@ -13,14 +14,19 @@ import {
 } from "@/lib/leaderboard";
 import { updateLeaderboardIdentityAction } from "@/server/actions/profile";
 import { SubmitButton } from "@/components/app/submit-button";
+import { PageHeader } from "@/components/app/brand/page-header";
+import { EmptyState } from "@/components/app/brand/empty-state";
 
 export const metadata = { title: "Comunidad" };
 
+/* Podio de marca: 1° ámbar resaltador, 2°/3° papel. Rotación de sticker
+   estática (sin -auto: el ranking es estado persistente, no celebración). */
 const PODIUM_STYLES = [
-  "border-amber-400/60 bg-amber-400/10", // 1°
-  "border-zinc-400/60 bg-zinc-300/10", // 2°
-  "border-orange-700/40 bg-orange-700/10", // 3°
+  "border-accent bg-highlight-soft", // 1°
+  "border-border bg-card", // 2°
+  "border-border bg-card", // 3°
 ];
+const PODIUM_ROTATIONS = ["-2deg", "1.5deg", "-1deg"];
 
 function initials(name: string) {
   return name
@@ -102,22 +108,25 @@ export default async function ComunidadPage({
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-8">
       <div>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">
-          Comunidad
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Quienes están aprendiendo en Aulia, esta semana y de siempre.
+        <PageHeader
+          className="mb-0"
+          nota={isAllTime ? "de siempre ✺" : "tu semana ✺"}
+          titulo="Comunidad"
+          subtitulo="Quienes están aprendiendo en Aulia, esta semana y de siempre."
+        />
+        <p className="hand mt-2 inline-block rotate-[-2deg]">
+          aquí nadie estudia solo ✺
         </p>
       </div>
 
-      {/* Mi posición */}
-      {myRank && myRank.rank !== null && (
-        <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+      {/* Mi posición — el dato es semanal: solo en el tab "Esta semana". */}
+      {!isAllTime && myRank && myRank.rank !== null && (
+        <div className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 shadow-soft">
           <Trophy className="size-5 text-primary" />
           <p className="text-sm">
             Esta semana vas <strong>#{myRank.rank}</strong> de{" "}
             {myRank.total.toLocaleString("es-CL")} con{" "}
-            <strong>{myRank.xp} XP</strong>. ¡Sigue así!
+            <strong>{myRank.xp.toLocaleString("es-CL")} XP</strong>. ¡Sigue así!
           </p>
         </div>
       )}
@@ -126,7 +135,8 @@ export default async function ComunidadPage({
       <div className="flex gap-2">
         <Link
           href="/app/comunidad"
-          className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+          aria-current={!isAllTime ? "page" : undefined}
+          className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold transition-colors ${
             !isAllTime
               ? "bg-primary text-primary-foreground"
               : "border border-border text-muted-foreground hover:text-foreground"
@@ -136,55 +146,80 @@ export default async function ComunidadPage({
         </Link>
         <Link
           href="/app/comunidad?tab=historico"
-          className={`rounded-full px-4 py-1.5 text-sm font-semibold transition-colors ${
+          aria-current={isAllTime ? "page" : undefined}
+          className={`inline-flex min-h-11 items-center rounded-full px-4 text-sm font-semibold transition-colors ${
             isAllTime
               ? "bg-primary text-primary-foreground"
               : "border border-border text-muted-foreground hover:text-foreground"
           }`}
         >
-          Histórico
+          De siempre
         </Link>
       </div>
 
       {board.rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border bg-card py-16 text-center">
-          <Medal className="mx-auto size-8 text-primary" />
-          <p className="mt-3 font-display font-semibold">
-            Aún no hay actividad esta semana
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Completa una lección y estrena el ranking.
-          </p>
-        </div>
+        isAllTime ? (
+          <EmptyState
+            nota="aquí va a estar tu gente ✺"
+            titulo="Aún no hay actividad"
+            descripcion="Cuando alguien complete su primera lección, aparece aquí para siempre. Puedes ser tú."
+            cta={{ href: "/app", label: "Ir a mis rutas" }}
+          />
+        ) : (
+          <EmptyState
+            nota="aquí va a estar tu gente ✺"
+            titulo="Aún no hay actividad esta semana"
+            descripcion="Completa una lección y estrena el ranking de la semana."
+            cta={{ href: "/app", label: "Ir a mis rutas" }}
+          />
+        )
       ) : (
         <>
           {/* Podio */}
           {podium.length > 0 && (
             <div className="grid gap-3 sm:grid-cols-3">
-              {podium.map((row, i) => (
-                <div
-                  key={row.userId}
-                  className={`rounded-xl border p-4 text-center ${PODIUM_STYLES[i]}`}
-                >
-                  <p className="text-2xl">{["🥇", "🥈", "🥉"][i]}</p>
-                  <span className="mx-auto mt-2 grid size-11 place-items-center rounded-full bg-card text-sm font-bold text-primary">
-                    {initials(row.displayName)}
-                  </span>
-                  <p className="mt-2 truncate text-sm font-bold">{row.displayName}</p>
-                  <p className="text-xs text-muted-foreground">
-                    Nivel {row.level}
-                    {row.streak > 0 && ` · 🔥 ${row.streak}`}
-                  </p>
-                  <p className="mt-1 text-sm font-extrabold text-primary">
-                    {row.xp.toLocaleString("es-CL")} XP
-                  </p>
-                  {row.studying && (
-                    <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                      {row.studying}
+              {podium.map((row, i) => {
+                const isMe = row.userId === user.id;
+                return (
+                  <div
+                    key={row.userId}
+                    className={`sticker-pop w-full flex-col items-center rounded-xl border p-4 text-center shadow-soft ${PODIUM_STYLES[i]} ${
+                      isMe ? "ring-2 ring-primary" : ""
+                    }`}
+                    style={{ "--pop-rotate": PODIUM_ROTATIONS[i] } as CSSProperties}
+                  >
+                    <p className="flex items-center justify-center gap-1.5 font-display text-sm font-bold">
+                      <Medal className="size-5 text-accent" /> {i + 1}°
                     </p>
-                  )}
-                </div>
-              ))}
+                    <span className="mx-auto mt-2 grid size-11 place-items-center rounded-full bg-card text-sm font-bold text-primary">
+                      {initials(row.displayName)}
+                    </span>
+                    <p className="mt-2 w-full truncate text-sm font-bold">
+                      {row.displayName}
+                      {isMe && (
+                        <span className="ml-1.5 text-xs font-normal text-primary">(tú)</span>
+                      )}
+                    </p>
+                    <p className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
+                      Nivel {row.level}
+                      {row.streak > 0 && (
+                        <>
+                          {" · "}
+                          <Flame className="size-3 text-accent" /> {row.streak}
+                        </>
+                      )}
+                    </p>
+                    <p className="mt-1 text-sm font-extrabold text-primary">
+                      {row.xp.toLocaleString("es-CL")} XP
+                    </p>
+                    {row.studying && (
+                      <p className="mt-1 w-full truncate text-[11px] text-muted-foreground">
+                        {row.studying}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -199,7 +234,7 @@ export default async function ComunidadPage({
         </>
       )}
 
-      {/* Privacidad: visibilidad + alias */}
+      {/* Privacidad: visibilidad + alias — zona de sobriedad (formulario). */}
       <details className="rounded-lg border border-border bg-card px-4 py-3">
         <summary className="flex cursor-pointer items-center gap-2 text-sm font-medium text-muted-foreground">
           {myProfile?.visible ? (

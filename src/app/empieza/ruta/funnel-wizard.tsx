@@ -1,11 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, type CSSProperties } from "react";
 import Link from "next/link";
 import { Sparkles, ArrowLeft, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
+import { Seal, Shield } from "@/components/marketing/landing/icons";
+import { formatPrice } from "@/lib/utils";
+import { site } from "@/lib/site";
 import {
   publicWizardQuestionsAction,
   createAccountAndIntentAction,
@@ -19,9 +24,11 @@ import type { WizardQuestion } from "@/lib/ai/wizard";
 */
 
 const OTHER = "__other__";
+/** Clave donde se respalda el intake si el usuario parte a /login (la lee /app/crear). */
+const INTAKE_KEY = "aulia:funnel-intake";
 type Answers = Record<string, { selected: string[]; other: string }>;
 
-export function FunnelWizard() {
+export function FunnelWizard({ plan }: { plan?: "pro" }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [topic, setTopic] = useState("");
   const [level, setLevel] = useState("principiante");
@@ -84,13 +91,8 @@ export function FunnelWizard() {
   const phoneValid = /^\+?\d{8,15}$/.test(phone.trim().replace(/[\s().-]/g, ""));
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
-  const submit = () => {
-    setError(null);
-    setEmailTaken(false);
-    if (!emailValid) return setError("Revisa tu correo: no parece válido.");
-    if (!phoneValid) return setError("Revisa tu WhatsApp (ej: +56 9 1234 5678).");
-    if (password.length < 8) return setError("Tu contraseña necesita al menos 8 caracteres.");
-
+  /** Arma el intake a partir de las respuestas (mismo formato que la action). */
+  const buildIntake = () => {
     const goalParts: string[] = [];
     const expParts: string[] = [];
     let metaDisplay = "";
@@ -103,7 +105,35 @@ export function FunnelWizard() {
         goalParts.push(goalParts.length === 0 ? text : `${q.label} ${text}`);
       }
     }
-    const goal = goalParts.join(". ") || `Quiero aprender ${topic.trim()}`;
+    return {
+      topic: topic.trim(),
+      level,
+      goal: (goalParts.join(". ") || `Quiero aprender ${topic.trim()}`).slice(0, 600),
+      metaDisplay: metaDisplay || `Aprender ${topic.trim()}`,
+      priorExperience: expParts.join(". ").slice(0, 500) || undefined,
+    };
+  };
+
+  /** Respalda el intake antes de mandar al usuario a /login (no perder sus respuestas). */
+  const persistIntake = () => {
+    try {
+      sessionStorage.setItem(
+        INTAKE_KEY,
+        JSON.stringify({ ...buildIntake(), savedAt: Date.now() }),
+      );
+    } catch {
+      // Sin sessionStorage solo se pierde el prellenado; no bloquea el login.
+    }
+  };
+
+  const submit = () => {
+    setError(null);
+    setEmailTaken(false);
+    if (!emailValid) return setError("Revisa tu correo: no parece válido.");
+    if (!phoneValid) return setError("Revisa tu WhatsApp (ej: +56 9 1234 5678).");
+    if (password.length < 8) return setError("Tu contraseña necesita al menos 8 caracteres.");
+
+    const intake = buildIntake();
 
     startCreate(async () => {
       try {
@@ -112,12 +142,12 @@ export function FunnelWizard() {
           email: email.trim(),
           password,
           phone: phone.trim(),
-          topic: topic.trim(),
-          goal: goal.slice(0, 600),
-          metaDisplay: metaDisplay || `Aprender ${topic.trim()}`,
+          topic: intake.topic,
+          goal: intake.goal,
+          metaDisplay: intake.metaDisplay,
           level,
           language: "es",
-          priorExperience: expParts.join(". ").slice(0, 500) || undefined,
+          priorExperience: intake.priorExperience,
         });
         // Si vuelve, es un error de formulario (el éxito redirige solo).
         if (res && !res.ok) {
@@ -133,174 +163,225 @@ export function FunnelWizard() {
 
   const selectClass =
     "h-11 rounded-md border border-input bg-card px-3 text-base text-foreground shadow-sm focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30";
+  const stepCard = "ruled rounded-xl border border-border bg-card p-6 shadow-lift";
 
   return (
     <div className="mt-8">
-      <div className="mb-6 flex items-center justify-center gap-2">
-        {[1, 2, 3].map((s) => (
-          <span
-            key={s}
-            className={`h-1.5 rounded-full transition-all duration-300 ${step === s ? "w-8 bg-primary" : "w-4 bg-border"}`}
-          />
-        ))}
+      {/* Progreso de destacador: avanza "a tics", como quien marca casillas */}
+      <div
+        role="progressbar"
+        aria-valuemin={1}
+        aria-valuemax={3}
+        aria-valuenow={step}
+        aria-label={`Paso ${step} de 3`}
+        className="mb-6 h-1.5 overflow-hidden rounded-full bg-muted"
+      >
+        <div
+          key={step}
+          className="progress-fill animate-tick-progress h-full rounded-full bg-highlight"
+          style={{ "--progress": step / 3 } as CSSProperties}
+        />
       </div>
 
       {error && (
-        <p className="mb-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
+        <NotaBanner tone="error" className="mb-4">
           {error}{" "}
           {emailTaken && (
-            <Link href="/login?next=%2Fapp%2Fcrear" className="font-bold underline">
+            <Link
+              href="/login?next=%2Fapp%2Fcrear"
+              onClick={persistIntake}
+              className="font-bold text-foreground underline"
+            >
               Iniciar sesión
             </Link>
           )}
-        </p>
+        </NotaBanner>
       )}
 
       {step === 1 && (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="topic">¿Qué quieres aprender?</Label>
-            <Input
-              id="topic"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              placeholder="Ej: Inteligencia artificial, Fotografía, Inglés…"
-              className="text-base"
-              autoFocus
-            />
+        <div className={stepCard}>
+          <p className="hand inline-block rotate-[-2deg]">aquí parte todo ✺</p>
+          <div className="mt-4 flex flex-col gap-5">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="topic">¿Qué quieres aprender?</Label>
+              <Input
+                id="topic"
+                value={topic}
+                onChange={(e) => setTopic(e.target.value)}
+                placeholder="Ej: Inteligencia artificial, Fotografía, Inglés…"
+                className="text-base"
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="level">Tu nivel actual</Label>
+              <select id="level" value={level} onChange={(e) => setLevel(e.target.value)} className={selectClass}>
+                <option value="principiante">Principiante</option>
+                <option value="intermedio">Intermedio</option>
+                <option value="avanzado">Avanzado</option>
+              </select>
+            </div>
+            <Button size="lg" onClick={goToQuestions} disabled={topic.trim().length < 2 || loadingQ}>
+              {loadingQ ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Diseñando tus preguntas…
+                </>
+              ) : (
+                <>
+                  <Sparkles className="size-4" /> Diseñar mi ruta
+                </>
+              )}
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              2 minutos · La IA diseña tu ruta exactamente para tu meta
+            </p>
+            <p className="-mt-3 text-center text-xs text-muted-foreground">
+              {formatPrice(site.pricing.singlePath, "CLP")} una vez, tuya para siempre
+            </p>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="level">Tu nivel actual</Label>
-            <select id="level" value={level} onChange={(e) => setLevel(e.target.value)} className={selectClass}>
-              <option value="principiante">Principiante</option>
-              <option value="intermedio">Intermedio</option>
-              <option value="avanzado">Avanzado</option>
-            </select>
-          </div>
-          <Button size="lg" onClick={goToQuestions} disabled={topic.trim().length < 2 || loadingQ}>
-            {loadingQ ? (
-              <>
-                <Loader2 className="size-4 animate-spin" /> Diseñando tus preguntas…
-              </>
-            ) : (
-              <>
-                <Sparkles className="size-4" /> Armar mi ruta
-              </>
-            )}
-          </Button>
-          <p className="text-center text-xs text-muted-foreground">
-            2 minutos · La IA diseña tu ruta exactamente para tu meta
-          </p>
-          <p className="-mt-3 text-center text-xs text-muted-foreground">
-            desde $9.990, tuya para siempre
-          </p>
         </div>
       )}
 
       {step === 2 && (
-        <div className="flex flex-col gap-6">
-          {questions.map((q) => {
-            const a = answers[q.id];
-            return (
-              <div key={q.id} className="flex flex-col gap-2.5">
-                <Label>{q.label}</Label>
-                {q.kind === "text" ? (
-                  <textarea
-                    rows={2}
-                    value={a?.selected[0] ?? ""}
-                    onChange={(e) => setText(q.id, e.target.value)}
-                    placeholder={q.placeholder ?? ""}
-                    className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-base shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-                  />
-                ) : (
-                  <div className="flex flex-wrap gap-2">
-                    {[...q.options, OTHER].map((opt) => {
-                      const isOther = opt === OTHER;
-                      const active = a?.selected.includes(opt) ?? false;
-                      return (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => toggle(q, opt)}
-                          className={`min-h-11 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
-                            active
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "border-border bg-card hover:border-primary/40"
-                          }`}
-                        >
-                          {isOther ? "Otro…" : opt}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-                {a?.selected.includes(OTHER) && (
-                  <Input
-                    value={a.other}
-                    onChange={(e) => setOther(q.id, e.target.value)}
-                    placeholder="Cuéntanos con tus palabras…"
-                    className="text-base"
-                    autoFocus
-                  />
-                )}
-              </div>
-            );
-          })}
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(1)} aria-label="Volver">
-              <ArrowLeft className="size-4" />
-            </Button>
-            <Button size="lg" className="flex-1" onClick={() => setStep(3)} disabled={answeredCount === 0}>
-              <Sparkles className="size-4" /> Ver mi ruta
-            </Button>
+        <div className={stepCard}>
+          <p className="hand inline-block rotate-[-2deg]">tus respuestas diseñan la ruta ✺</p>
+          <div className="mt-4 flex flex-col gap-6">
+            {questions.map((q) => {
+              const a = answers[q.id];
+              return (
+                <div key={q.id} className="flex flex-col gap-2.5">
+                  {q.kind === "text" ? (
+                    <Label htmlFor={`q-${q.id}`}>{q.label}</Label>
+                  ) : (
+                    <Label id={`q-${q.id}-label`}>{q.label}</Label>
+                  )}
+                  {q.kind === "text" ? (
+                    <textarea
+                      id={`q-${q.id}`}
+                      rows={2}
+                      value={a?.selected[0] ?? ""}
+                      onChange={(e) => setText(q.id, e.target.value)}
+                      placeholder={q.placeholder ?? ""}
+                      className="flex w-full rounded-md border border-input bg-card px-3.5 py-2.5 text-base shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                    />
+                  ) : (
+                    <div
+                      role="group"
+                      aria-labelledby={`q-${q.id}-label`}
+                      className="flex flex-wrap gap-2"
+                    >
+                      {[...q.options, OTHER].map((opt) => {
+                        const isOther = opt === OTHER;
+                        const active = a?.selected.includes(opt) ?? false;
+                        return (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => toggle(q, opt)}
+                            aria-pressed={active}
+                            className={`min-h-11 rounded-full border px-3.5 py-2 text-sm font-medium transition-colors ${
+                              active
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-border bg-card hover:border-primary/40"
+                            }`}
+                          >
+                            {isOther ? "Otro…" : opt}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {a?.selected.includes(OTHER) && (
+                    <Input
+                      value={a.other}
+                      onChange={(e) => setOther(q.id, e.target.value)}
+                      placeholder="Cuéntanos con tus palabras…"
+                      aria-label="Tu respuesta"
+                      className="text-base"
+                      autoFocus
+                    />
+                  )}
+                </div>
+              );
+            })}
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(1)} aria-label="Volver">
+                <ArrowLeft className="size-4" />
+              </Button>
+              <Button size="lg" className="flex-1" onClick={() => setStep(3)} disabled={answeredCount === 0}>
+                Continuar
+              </Button>
+            </div>
           </div>
         </div>
       )}
 
       {step === 3 && (
-        <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-center">
-            <p className="hand text-lg">tu ruta está lista para diseñarse ✺</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Dinos a dónde te la enviamos y crea tu acceso.
+        <div className={stepCard}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              submit();
+            }}
+            className="flex flex-col gap-4"
+          >
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-center">
+              <p className="hand text-lg">tu ruta está lista para diseñarse ✺</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Dinos a dónde te la enviamos y crea tu acceso.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="f-name">Tu nombre</Label>
+              <Input id="f-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Camila" autoComplete="name" required className="text-base" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="f-email">Tu correo</Label>
+              <Input id="f-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@gmail.com" autoComplete="email" className="text-base" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="f-phone">Tu WhatsApp</Label>
+              <Input id="f-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" autoComplete="tel" className="text-base" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="f-pass">Crea tu contraseña</Label>
+              <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" className="text-base" />
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              <Badge variant="outline" className="bg-card">
+                <Seal size={16} />
+                {formatPrice(site.pricing.singlePath, "CLP")} una vez, tuya para siempre
+              </Badge>
+              <Badge variant="outline" className="bg-card">
+                <Shield size={16} />
+                Garantía de 7 días
+              </Badge>
+            </div>
+            {plan === "pro" && (
+              <p className="text-center text-xs text-muted-foreground">
+                Te interesa Aulia Pro: {formatPrice(site.pricing.proThirtyDays, "CLP")} por
+                30 días, sin cobro automático. Lo eliges en el paso de pago.
+              </p>
+            )}
+            <div className="mt-1 flex items-center gap-3">
+              <Button type="button" variant="outline" size="icon" className="size-11" onClick={() => setStep(2)} disabled={creating} aria-label="Volver">
+                <ArrowLeft className="size-4" />
+              </Button>
+              <Button type="submit" size="lg" className="flex-1" disabled={creating}>
+                {creating ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Diseñando tu ruta…
+                  </>
+                ) : (
+                  "Crear mi acceso y ver mi temario"
+                )}
+              </Button>
+            </div>
+            <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+              <Lock className="size-3" /> Tus datos van cifrados. Tu avance y tus
+              tareas te llegan al correo; dejas tu WhatsApp para acompañarte.
             </p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="f-name">Tu nombre</Label>
-            <Input id="f-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej: Camila" className="text-base" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="f-email">Tu correo</Label>
-            <Input id="f-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tucorreo@gmail.com" className="text-base" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="f-phone">Tu WhatsApp</Label>
-            <Input id="f-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+56 9 1234 5678" className="text-base" />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="f-pass">Crea tu contraseña</Label>
-            <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" className="text-base" />
-          </div>
-          <div className="mt-1 flex items-center gap-3">
-            <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(2)} disabled={creating} aria-label="Volver">
-              <ArrowLeft className="size-4" />
-            </Button>
-            <Button size="lg" className="flex-1" onClick={submit} disabled={creating}>
-              {creating ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" /> Diseñando tu ruta…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="size-4" /> Ver mi ruta personalizada
-                </>
-              )}
-            </Button>
-          </div>
-          <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-            <Lock className="size-3" /> Tus datos van cifrados. Tu avance y tus
-            tareas te llegan al correo; dejas tu WhatsApp para acompañarte.
-          </p>
+          </form>
         </div>
       )}
     </div>

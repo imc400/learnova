@@ -1,6 +1,7 @@
-import { Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { CreateWizard } from "@/components/app/create-wizard";
+import { PageHeader } from "@/components/app/brand/page-header";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
 
 export const metadata = { title: "Crear ruta" };
 
@@ -37,50 +38,55 @@ export default async function CreatePathPage({
 
   return (
     <div className="mx-auto max-w-xl">
-      <div className="text-center">
-        <span className="mx-auto grid size-12 place-items-center rounded-lg bg-primary/10 text-primary">
-          <Sparkles className="size-6" />
-        </span>
-        <h1 className="mt-4 font-display text-2xl font-semibold tracking-tight">
-          {prefillTopic ? (
+      {/* Presupuesto 1 tab-note/pantalla: cuando llega de comprar Pro, el
+          tab-note del header ES la bienvenida. */}
+      <PageHeader
+        className="mb-6 text-center"
+        nota={sp.pro === "bienvenida" ? "bienvenido a Pro ✺" : "diseñemos tu ruta ✺"}
+        titulo={
+          prefillTopic ? (
             "Tu siguiente ruta"
           ) : (
             <>
               ¿Qué quieres <span className="ink-hl">aprender</span>?
             </>
-          )}
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {prefillTopic
+          )
+        }
+        subtitulo={
+          prefillTopic
             ? "Ajusta lo que quieras — la armamos sobre lo que ya dominas."
-            : "Dos pasos: nos cuentas el tema y la IA te hace las preguntas correctas."}
-        </p>
-      </div>
+            : "Dos pasos: nos cuentas el tema y la IA te hace las preguntas correctas."
+        }
+      />
 
       {sp.pro === "bienvenida" && (
-        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-center text-sm font-medium text-primary">
-          🎉 ¡Bienvenido/a a Aulia Pro! Crea tu primera ruta del mes — está
-          incluida en tu plan.
-        </p>
+        <NotaBanner tone="exito" titulo="Tu Pro está activo" className="mb-6">
+          Crea tu primera ruta del mes — está incluida en tu plan.
+        </NotaBanner>
       )}
+      {/* Red de seguridad: la validación principal ahora corre en el cliente
+          (el wizard no se borra), pero el redirect del server sigue cubierto. */}
       {sp.error === "validacion" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Revisa el tema y la meta: necesitamos un poco más de detalle.
-        </p>
+        <NotaBanner tone="error" titulo="Falta un poco más de detalle" className="mb-6">
+          Revisa el tema y la meta: necesitamos un poco más para diseñar tu
+          ruta. Si el problema sigue, escríbenos a hola@aulia.ai.
+        </NotaBanner>
       )}
       {sp.error === "telefono" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Revisa tu WhatsApp: debe tener entre 8 y 15 dígitos (ej: +56 9 1234 5678).
-        </p>
+        <NotaBanner tone="error" titulo="Revisa tu WhatsApp" className="mb-6">
+          Debe tener entre 8 y 15 dígitos (ej: +56 9 1234 5678).
+        </NotaBanner>
       )}
 
-      <CreateWizard
-        defaultLanguage={defaultLang}
-        prefillTopic={prefillTopic}
-        prefillGoal={prefillGoal}
-        prefillLevel={prefillLevel}
-        fromPathId={fromPathId}
-      />
+      <div className="ruled rounded-xl border border-border bg-card p-6 shadow-soft">
+        <CreateWizard
+          defaultLanguage={defaultLang}
+          prefillTopic={prefillTopic}
+          prefillGoal={prefillGoal}
+          prefillLevel={prefillLevel}
+          fromPathId={fromPathId}
+        />
+      </div>
     </div>
   );
 }

@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getGenerationProgress } from "@/server/actions/progress";
+
+/** Polling de RESPALDO (Realtime es la vía rápida): ≥5s para no duplicar. */
+const POLL_INTERVAL_MS = 5000;
 
 /** Extrae "N" de un paso tipo "Lección N/Total: …". */
 function parseDone(step: string | null, total: number | null): number | null {
@@ -51,6 +54,8 @@ export function GeneratingState({
   const [progress, setProgress] = useState(initialProgress);
   const [step, setStep] = useState(initialStep);
   const [eta, setEta] = useState<string | null>(null);
+  // Estado failed PROPIO: jamás forzar la barra a 100 (flash "¡Ruta lista!").
+  const [failed, setFailed] = useState(false);
 
   const doneRef = useRef<number | null>(null);
   const totalRef = useRef<number | null>(totalLessons);
@@ -85,7 +90,14 @@ export function GeneratingState({
       if (d != null) doneRef.current = d;
       setEta(formatEta(doneRef.current, totalRef.current, startedRef.current));
 
-      if ((p.status === "ready" || p.status === "failed") && !finishedRef.current) {
+      if (p.status === "failed" && !finishedRef.current) {
+        finishedRef.current = true;
+        setFailed(true);
+        // El refresh muestra la vista de error del servidor (con salida real).
+        setTimeout(() => router.refresh(), 600);
+        return;
+      }
+      if (p.status === "ready" && !finishedRef.current) {
         finishedRef.current = true;
         setProgress(100);
         setTimeout(() => router.refresh(), 400);
@@ -108,11 +120,10 @@ export function GeneratingState({
       }
     }
 
-    // Polling SIEMPRE activo como fuente confiable (cada 2s, usa la sesión
-    // autenticada del servidor). Realtime es un extra para updates instantáneos;
-    // si el WebSocket se suscribe pero no entrega eventos (RLS/auth), el polling
-    // garantiza que la barra NUNCA se quede pegada.
-    poll = setInterval(pollOnce, 2000);
+    // UN solo mecanismo principal: Realtime para updates instantáneos, con
+    // polling de RESPALDO cada 5s (usa la sesión del servidor). Si el WebSocket
+    // se suscribe pero no entrega eventos (RLS/auth), la barra no se pega.
+    poll = setInterval(pollOnce, POLL_INTERVAL_MS);
     void pollOnce();
 
     const channel = supabase
@@ -145,10 +156,27 @@ export function GeneratingState({
     };
   }, [pathId, router]);
 
-  const done = progress >= 100;
+  const done = !failed && progress >= 100;
+  const pct = Math.min(100, Math.max(0, progress));
+
+  // Error: tinta roja sobre layout recto, sin gestos (zona de sobriedad).
+  if (failed) {
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center sm:p-12">
+        <AlertTriangle className="mx-auto size-8 text-destructive" />
+        <h2 className="mt-4 font-display text-lg font-semibold">
+          No pudimos terminar tu ruta
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Algo falló durante la generación — no perdiste nada. Estamos cargando
+          el detalle, o escríbenos a hola@aulia.ai y lo resolvemos.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-8 sm:p-12">
+    <div className="ruled mock-margin rounded-xl border border-border bg-card p-8 shadow-lift sm:p-12">
       <div className="flex flex-col items-center text-center">
         {done ? (
           <CheckCircle2 className="size-10 text-primary" />
@@ -156,32 +184,32 @@ export function GeneratingState({
           <Loader2 className="size-10 animate-spin text-primary" />
         )}
         <h2 className="mt-6 font-display text-xl font-semibold">
-          {done ? "¡Ruta lista!" : "Construyendo tu ruta"}
+          {done ? "¡Ruta lista!" : "Diseñando tu ruta…"}
         </h2>
 
-        {/* Barra de progreso REAL */}
+        {/* Barra de progreso REAL — avanza "a tics", como quien marca casillas */}
         <div className="mt-6 w-full max-w-md">
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
-              style={{ width: `${Math.min(100, Math.max(0, progress))}%` }}
+              className="progress-fill animate-tick-progress h-full rounded-full bg-primary"
+              style={{ "--progress": pct / 100 } as CSSProperties}
             />
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
             <span>{progress}% completado</span>
             {!done && (
-              <span>{eta ? `⏱ ${eta} restante` : "Calculando tiempo…"}</span>
+              <span>{eta ? `${eta} restante` : "Calculando tiempo…"}</span>
             )}
           </div>
         </div>
 
-        {/* Paso actual real (accesible) */}
+        {/* Paso actual real, como nota al margen (accesible) */}
         <p
-          className="mt-5 min-h-5 text-sm text-foreground"
+          className="hand mt-5 min-h-6 text-sm"
           aria-live="polite"
           aria-atomic="true"
         >
-          {step}
+          {step} ✺
         </p>
 
         <p className="mt-6 max-w-sm text-xs text-muted-foreground">

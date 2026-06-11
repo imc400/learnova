@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { getGenerationProgress } from "@/server/actions/progress";
 
+/** El progreso parte en 25% (estructura lista) y el contenido cubre 25→95:
+ *  el conteo de lecciones listas se deriva de ese tramo. */
+const STRUCTURE_PCT = 25;
+const CONTENT_SPAN_PCT = 70;
+
 /**
  * Vive en la vista de la ruta YA navegable mientras el contenido se rellena en
  * background. Hace polling del progreso y refresca la página en cada avance,
@@ -57,7 +62,13 @@ export function RouteProgressLive({
   if (!showBanner || progress >= 100) return null;
 
   const lessonsReady = totalLessons
-    ? Math.max(0, Math.round(((progress - 25) / 70) * totalLessons))
+    ? Math.min(
+        totalLessons,
+        Math.max(
+          0,
+          Math.round(((progress - STRUCTURE_PCT) / CONTENT_SPAN_PCT) * totalLessons),
+        ),
+      )
     : null;
 
   return (
@@ -73,7 +84,7 @@ export function RouteProgressLive({
         </span>
       </span>
       <span className="hidden text-xs text-muted-foreground sm:inline">
-        Ya puedes empezar por las primeras ✨
+        Ya puedes empezar por las primeras
       </span>
     </div>
   );

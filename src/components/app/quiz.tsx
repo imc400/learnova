@@ -1,11 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, X, Loader2, Flame, Trophy, Zap, Award, ArrowRight } from "lucide-react";
+import { Check, X, Loader2, ArrowRight } from "lucide-react";
+import { Flame, Play } from "@/components/marketing/landing/icons";
 import { Button } from "@/components/ui/button";
+import { badgeVariants } from "@/components/ui/badge";
+import { CelebracionStickers } from "@/components/app/brand/celebracion-stickers";
 import { ModuleRating } from "@/components/app/module-rating";
+import { RichText } from "@/components/app/rich-text";
+import { mmss, requestVideoSeek } from "@/components/app/youtube-embed";
+import { cn } from "@/lib/utils";
 import {
   gradeQuizAction,
   type GradeResult,
@@ -21,15 +27,21 @@ interface QuizQuestion {
 export function Quiz({
   quizId,
   questions,
+  hasVideo = true,
 }: {
   quizId: string;
   questions: QuizQuestion[];
+  /** Si la lección no tiene video, el chip "El video lo explica" no se muestra. */
+  hasVideo?: boolean;
 }) {
   const router = useRouter();
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
   const [result, setResult] = useState<GradeResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Regla del "una vez": la ráfaga de stickers anima SOLO al recibir el
+  // resultado; si el usuario reintenta y vuelve a aprobar, no se re-anima.
+  const [yaCelebrado, setYaCelebrado] = useState(false);
 
   function toggle(qId: string, optId: string, multiple: boolean) {
     setAnswers((prev) => {
@@ -56,7 +68,7 @@ export function Quiz({
       if (r.passed) router.refresh();
     } catch {
       setError(
-        "No pudimos corregir el quiz. Revisa tu conexión e inténtalo de nuevo.",
+        "No pudimos corregir el quiz — tus respuestas siguen aquí. Revisa tu conexión e inténtalo de nuevo.",
       );
     } finally {
       setLoading(false);
@@ -64,6 +76,7 @@ export function Quiz({
   }
 
   function retry() {
+    if (result?.passed || result?.gamification) setYaCelebrado(true);
     setResult(null);
     setAnswers({});
     setError(null);
@@ -72,72 +85,71 @@ export function Quiz({
   const resultByQ = new Map(result?.results.map((r) => [r.questionId, r]));
   const g = result?.gamification ?? null;
 
+  // Ráfaga R5: máx. 3 chips — XP (accent), racha (outline), logro/nivel (primary).
+  const stickers: { contenido: ReactNode; variant?: "accent" | "primary" | "outline" }[] = [];
+  if (g) {
+    if (g.xpGained > 0) stickers.push({ contenido: <>+{g.xpGained} XP</> });
+    if (g.streakExtended && g.streak > 1)
+      stickers.push({
+        contenido: (
+          <>
+            <Flame size={14} /> Racha: {g.streak} días
+          </>
+        ),
+        variant: "outline",
+      });
+    const logro = g.newAchievements[0];
+    if (logro) {
+      stickers.push({ contenido: <>Logro nuevo: {logro.title}</>, variant: "primary" });
+    } else if (g.levelUp) {
+      stickers.push({ contenido: <>Subiste al nivel {g.levelUp}</>, variant: "primary" });
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6">
       {result && (
         <div
-          className={`rounded-md px-4 py-3 text-sm font-medium ${
+          role="status"
+          className={`rounded-lg border px-4 py-3 text-sm ${
             result.passed
-              ? "bg-primary/10 text-primary"
-              : "bg-accent/15 text-accent-foreground"
+              ? "border-primary/30 bg-primary/5"
+              : "border-accent bg-highlight-soft"
           }`}
         >
-          <p>
+          <p className={result.passed ? "font-semibold text-primary" : "font-medium text-accent-foreground"}>
             Obtuviste {Math.round(result.score * 100)}%.{" "}
             {result.passed
-              ? "¡Aprobado! La lección quedó completada. 🎉"
-              : "Repasa y vuelve a intentarlo."}
+              ? "¡Aprobado! La lección quedó completada."
+              : "Repasa y vuelve a intentarlo — el video y los apuntes siguen aquí arriba."}
           </p>
 
-          {g && (g.xpGained > 0 || g.newAchievements.length > 0) && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {g.xpGained > 0 && (
-                <span className="flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
-                  <Zap className="size-3.5" /> +{g.xpGained} XP
-                </span>
-              )}
-              {g.levelUp && (
-                <span className="flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground">
-                  <Award className="size-3.5" /> ¡Subiste al nivel {g.levelUp}!
-                </span>
-              )}
-              {g.streakExtended && g.streak > 1 && (
-                <span className="flex items-center gap-1 rounded-full bg-accent/20 px-2.5 py-1 text-xs font-semibold text-accent-foreground">
-                  <Flame className="size-3.5 text-accent" /> Racha: {g.streak} días
-                </span>
-              )}
-              {g.newAchievements.map((a) => (
-                <span
-                  key={a.code}
-                  title={a.description}
-                  className="flex items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 py-1 text-xs font-semibold text-primary"
-                >
-                  <Trophy className="size-3.5" /> {a.title}
-                </span>
-              ))}
+          {stickers.length > 0 && (
+            <CelebracionStickers stickers={stickers} animar={!yaCelebrado} />
+          )}
+
+          {/* Cierre de ruta: el CTA domina; el rating del módulo va debajo. */}
+          {g?.pathCompleted && (
+            <div className="mt-3">
+              <p className="font-display text-base">
+                ¡<span className="hl-draw animate-draw-underline">Terminaste</span>{" "}
+                la ruta <strong>{g.pathCompleted.title}</strong>! Enorme.
+              </p>
+              <Button asChild size="sm" className="mt-3">
+                <Link href={`/app/rutas/${g.pathCompleted.id}`}>
+                  Ver mi siguiente paso <ArrowRight className="size-3.5" />
+                </Link>
+              </Button>
             </div>
           )}
 
           {g?.moduleCompleted && (
-            <div className="mt-2">
+            <div className="mt-3">
               <p className="text-sm">
-                🏁 ¡Completaste el módulo <strong>{g.moduleCompleted.title}</strong>!
+                Completaste el módulo <strong>{g.moduleCompleted.title}</strong>.
               </p>
               {/* Pico emocional = el mejor momento para pedir feedback (peak-end). */}
               <ModuleRating moduleId={g.moduleCompleted.id} />
-            </div>
-          )}
-          {g?.pathCompleted && (
-            <div className="mt-2">
-              <p className="text-sm">
-                🏆 ¡Terminaste la ruta <strong>{g.pathCompleted.title}</strong>! Enorme.
-              </p>
-              <Link
-                href={`/app/rutas/${g.pathCompleted.id}`}
-                className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground"
-              >
-                Ver mi siguiente paso <ArrowRight className="size-3.5" />
-              </Link>
             </div>
           )}
         </div>
@@ -152,13 +164,39 @@ export function Quiz({
             </p>
 
             {q.type === "open" ? (
-              <textarea
-                rows={3}
-                disabled={!!result}
-                onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: [e.target.value] }))}
-                className="mt-3 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none"
-                placeholder="Escribe tu respuesta…"
-              />
+              <>
+                <textarea
+                  rows={3}
+                  disabled={!!result}
+                  value={answers[q.id]?.[0] ?? ""}
+                  onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: [e.target.value] }))}
+                  className="mt-3 w-full rounded-sm border border-input bg-background px-3 py-2 text-sm focus-visible:border-ring focus-visible:outline-none"
+                  placeholder="Escribe tu respuesta…"
+                />
+                {r ? (
+                  <p
+                    className={`mt-2 flex items-center gap-1.5 text-xs font-medium ${
+                      r.correct ? "text-primary" : "text-destructive"
+                    }`}
+                  >
+                    {r.correct ? (
+                      <>
+                        <Check className="size-3.5" /> Respuesta registrada — cuenta
+                        para tu avance.
+                      </>
+                    ) : (
+                      <>
+                        <X className="size-3.5" /> Quedó muy corta: escribe al menos
+                        20 caracteres para que cuente.
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Respuestas de 20+ caracteres cuentan.
+                  </p>
+                )}
+              </>
             ) : (
               <ul className="mt-3 space-y-2">
                 {q.options.map((opt) => {
@@ -199,18 +237,34 @@ export function Quiz({
               </ul>
             )}
 
-            {r && r.explanation && (
-              <p className="mt-3 rounded-sm bg-muted px-3 py-2 text-sm text-muted-foreground">
-                {r.explanation}
-              </p>
+            {r && (r.explanation || r.timestampSeconds != null) && (
+              <div className="mt-3 rounded-sm bg-muted px-3 py-2 text-sm text-muted-foreground">
+                {r.explanation && <RichText text={r.explanation} />}
+                {/* La promesa de la landing: el quiz cita el minuto del video. */}
+                {hasVideo && r.timestampSeconds != null && (
+                  <button
+                    type="button"
+                    onClick={() => requestVideoSeek(r.timestampSeconds!)}
+                    title={`Ver en el video en ${mmss(r.timestampSeconds)}`}
+                    className={cn(
+                      badgeVariants({ variant: "accent" }),
+                      "mt-2 min-h-11 cursor-pointer px-3.5 text-sm transition-colors hover:bg-accent/25",
+                    )}
+                  >
+                    <Play size={12} className="shrink-0" /> El video lo explica en{" "}
+                    {mmss(r.timestampSeconds)}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         );
       })}
 
       {error && (
-        <div role="alert" className="rounded-md bg-destructive/10 px-4 py-3 text-sm font-medium text-destructive">
-          {error}
+        <div role="alert" className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <X className="mt-0.5 size-4 shrink-0 text-destructive" />
+          <p className="text-muted-foreground">{error}</p>
         </div>
       )}
 

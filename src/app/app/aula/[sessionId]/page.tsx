@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { liveSessions, learningPaths, routeAgents, modules, lessons } from "@/db/schema";
@@ -10,6 +8,28 @@ import { buildClassBrief } from "@/lib/live/brief";
 import { buildInductionPrompt } from "@/lib/live/persona";
 import { getSessionCredentials } from "@/lib/live/provider";
 import { AulaClient } from "@/components/app/aula-client";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ sessionId: string }>;
+}) {
+  const { sessionId } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { title: "Clase en vivo" };
+  const [row] = await db
+    .select({ title: learningPaths.title })
+    .from(liveSessions)
+    .innerJoin(learningPaths, eq(learningPaths.id, liveSessions.pathId))
+    .where(and(eq(liveSessions.id, sessionId), eq(liveSessions.userId, user.id)))
+    .limit(1);
+  return {
+    title: row ? `Clase en vivo · «${row.title}»` : "Clase en vivo",
+  };
+}
 
 /**
  * El aula: valida la sesión, arma el BRIEF del alumno en el servidor (jamás
@@ -100,18 +120,13 @@ export default async function AulaPage({
       })}\n\n${brief.briefText}`
     : `${agent.systemPrompt}\n\n${brief.briefText}`;
   const firstMessage = isInduction
-    ? `¡Hola ${brief.studentFirstName}! Soy ${agent.name}, tu profesor en esta ruta. ¡Bienvenido! Antes de que empieces, déjame mostrarte qué vamos a aprender juntos y cómo funciona todo esto. ¿Te parece?`
+    ? `¡Hola ${brief.studentFirstName}! Soy ${agent.name}, tu profesor en esta ruta. Te doy la bienvenida. Antes de que empieces, déjame mostrarte qué vamos a aprender juntos y cómo funciona todo esto. ¿Te parece?`
     : brief.scriptedGreeting;
 
   return (
     <div className="mx-auto max-w-2xl">
-      <Link
-        href={`/app/rutas/${session.pathId}`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="size-4" /> {path.title}
-      </Link>
-
+      {/* El breadcrumb vive en AulaClient: mientras la clase está conectada se
+          oculta/intercepta para que un clic accidental no la termine. */}
       <AulaClient
         sessionId={session.id}
         signedUrl={signedUrl}
@@ -121,6 +136,7 @@ export default async function AulaPage({
         teacherName={agent.name}
         specialty={agent.specialty}
         pathId={session.pathId}
+        pathTitle={path.title}
         kind={isInduction ? "induction" : "class"}
         outline={outline}
       />

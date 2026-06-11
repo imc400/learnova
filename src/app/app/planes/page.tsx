@@ -1,16 +1,19 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
   Sparkles,
   Check,
   GraduationCap,
   Map,
-  Zap,
   Library,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getEntitlement } from "@/lib/subscription";
 import { subscribeProAction } from "@/server/actions/subscription";
 import { SubmitButton } from "@/components/app/submit-button";
+import { Button } from "@/components/ui/button";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
+import { formatPrice } from "@/lib/utils";
 import { env } from "@/lib/env";
 
 export const metadata = { title: "Planes" };
@@ -49,53 +52,59 @@ export default async function PlanesPage({
       </div>
 
       {sp.motivo === "limite-rutas" && (
-        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-center text-sm font-medium">
+        <NotaBanner tone="aviso" className="mt-4">
           Completaste tu cupo de rutas — con Pro creas {env.PRO_ROUTES_PER_MONTH}{" "}
           rutas nuevas cada mes.
-        </p>
+        </NotaBanner>
       )}
       {sp.error === "tarjeta" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          No pudimos registrar tu tarjeta. Nada se cobró — intenta de nuevo.
-        </p>
+        <NotaBanner tone="error" titulo="No pudimos registrar tu tarjeta" className="mt-4">
+          Nada se cobró — intenta de nuevo, o escríbenos a hola@aulia.ai y lo
+          vemos contigo.
+        </NotaBanner>
       )}
       {sp.error === "pago" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Algo falló al iniciar la suscripción. Intenta de nuevo en unos segundos.
-        </p>
+        <NotaBanner tone="error" titulo="Algo falló al iniciar el pago" className="mt-4">
+          No se hizo ningún cobro. Intenta de nuevo en unos segundos.
+        </NotaBanner>
       )}
-      {sp.error === "disponible" && (
-        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-center text-sm font-medium">
+      {/* Ramas SOLO del modo PAT (suscripción con cobro automático): el
+          card-return de Flow y el error 7001 de registerCard no existen en el
+          Pro manual, así que se gatean para no mostrar copy imposible.
+          WARNING: NO activar PRO_SUBSCRIPTION_ENABLED sin contrato PAT
+          firmado (task #45). */}
+      {proAutomatico && sp.error === "disponible" && (
+        <NotaBanner tone="aviso" className="mt-4">
           La suscripción Pro estará disponible muy pronto — estamos activando
           el cobro automático. Mientras tanto puedes comprar rutas
-          individuales, y te avisaremos apenas Pro esté listo. ✺
-        </p>
+          individuales, y te avisaremos apenas Pro esté listo.
+        </NotaBanner>
       )}
       {sp.error === "email" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Tu correo no parece recibir mensajes (¿quedó con un error de tipeo?).
-          El procesador de pagos lo verifica para enviarte tus comprobantes —
-          escríbenos a hola@aulia.ai y lo corregimos al tiro.
-        </p>
+        <NotaBanner tone="error" titulo="Tu correo no parece recibir mensajes" className="mt-4">
+          ¿Quedó con un error de tipeo? No se hizo ningún cobro — el procesador
+          de pagos verifica tu correo para enviarte los comprobantes.
+          Escríbenos a hola@aulia.ai y lo corregimos al tiro.
+        </NotaBanner>
       )}
-      {sp.error === "cobro" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Tu tarjeta quedó registrada pero el primer cobro fue rechazado (¿fondos
-          o cupo?). Nada quedó activo — intenta con otra tarjeta.
-        </p>
+      {proAutomatico && sp.error === "cobro" && (
+        <NotaBanner tone="error" titulo="El primer cobro fue rechazado" className="mt-4">
+          Tu tarjeta quedó registrada pero el cobro no pasó (¿fondos o cupo?).
+          Nada quedó activo — intenta con otra tarjeta.
+        </NotaBanner>
       )}
 
       <div className="mt-8 grid gap-5 md:grid-cols-2">
         {/* Por ruta */}
-        <div className="rounded-2xl border border-border bg-card p-6">
+        <div className="flex flex-col rounded-2xl border border-border bg-card p-6">
           <h2 className="font-display text-lg font-semibold">Por ruta</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Pagas una vez. Tuya para siempre.
           </p>
           <p className="mt-4 font-display text-3xl font-bold">
-            ${ruta.toLocaleString("es-CL")}
-            <span className="ml-1 text-sm font-semibold text-muted-foreground">
-              CLP / ruta
+            {formatPrice(ruta, "CLP")}
+            <span className="ml-1.5 text-sm font-semibold text-muted-foreground">
+              por ruta
             </span>
           </p>
           <ul className="mt-5 space-y-2.5 text-sm">
@@ -111,31 +120,38 @@ export default async function PlanesPage({
             ))}
           </ul>
           <p className="mt-5 text-xs text-muted-foreground">
-            Se compra al crear cada ruta — no necesitas hacer nada aquí.
+            Se paga al activar cada ruta, después de ver tu temario.
           </p>
+          <div className="mt-auto pt-4">
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/app/crear">Diseñar mi ruta</Link>
+            </Button>
+          </div>
         </div>
 
         {/* Pro */}
         <div className="relative rounded-2xl border-2 border-primary bg-card p-6 shadow-lift">
-          <span className="absolute -top-3 left-6 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-            ⭐ Para los que van en serio
+          <span className="tab-note absolute -top-4 left-6">
+            para los que van en serio ✺
           </span>
           <h2 className="font-display text-lg font-semibold">Aulia Pro</h2>
           <p className="mt-1 text-sm text-muted-foreground">
             Tu profesor particular, todos los meses.
           </p>
           <p className="mt-4 font-display text-3xl font-bold text-primary">
-            ${pro.toLocaleString("es-CL")}
-            <span className="ml-1 text-sm font-semibold text-muted-foreground">
-              {proAutomatico ? "CLP / mes" : "CLP · por 30 días"}
+            {formatPrice(pro, "CLP")}
+            <span className="ml-1.5 text-sm font-semibold text-muted-foreground">
+              {/* WARNING: NO activar PRO_SUBSCRIPTION_ENABLED sin contrato PAT
+                  firmado (task #45); el copy "/ mes" está PROHIBIDO en modo
+                  manual (Pro = 30 días, sin renovación automática). */}
+              {proAutomatico ? "/ mes" : "por 30 días"}
             </span>
           </p>
           <ul className="mt-5 space-y-2.5 text-sm">
             {[
               { icon: Map, t: `${env.PRO_ROUTES_PER_MONTH} rutas nuevas a tu medida cada mes` },
-              { icon: GraduationCap, t: "Clases en vivo con tu profesor cada semana" },
+              { icon: GraduationCap, t: "120 minutos al mes de clases en vivo, con todos tus profesores" },
               { icon: Library, t: "Tus rutas se encadenan en Caminos" },
-              { icon: Zap, t: "Funciones nuevas antes que nadie" },
             ].map((f, i) => (
               <li key={i} className="flex items-start gap-2.5">
                 <f.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {f.t}
@@ -148,6 +164,8 @@ export default async function PlanesPage({
             </SubmitButton>
           </form>
           <p className="mt-3 text-center text-xs text-muted-foreground">
+            {/* WARNING: la rama "/mes · cancelas cuando quieras" SOLO puede
+                verse con PAT firmado (task #45); prohibida en modo manual. */}
             {proAutomatico
               ? "Pago mensual seguro vía Flow. Cancelas cuando quieras y conservas el acceso hasta el fin del período."
               : "Pago seguro vía Flow. Sin cobro automático: pagas 30 días y te avisamos para renovar — sin permanencia ni sorpresas."}
@@ -156,8 +174,9 @@ export default async function PlanesPage({
       </div>
 
       <p className="mt-8 text-center text-sm text-muted-foreground">
-        Una clase particular humana cuesta $15.000–25.000 LA HORA. Tu profesor
-        de Aulia te acompaña todo el mes por menos que eso.
+        Una clase particular humana cuesta entre {formatPrice(15000, "CLP")} y{" "}
+        {formatPrice(25000, "CLP")} <span className="ink-hl">la hora</span>. Tu
+        profesor de Aulia te acompaña todo el mes por menos que eso.
       </p>
     </div>
   );

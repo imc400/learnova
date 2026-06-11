@@ -22,7 +22,12 @@ import { subscribeProAction } from "@/server/actions/subscription";
 import { generateRoutePreview } from "@/lib/ai/wizard";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Badge } from "@/components/ui/badge";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
+import { SkeletonCuaderno } from "@/components/app/brand/skeleton-cuaderno";
+import { AutoRefresh } from "@/components/app/auto-refresh";
+import { Seal } from "@/components/marketing/landing/icons";
 import { providerLabel } from "@/lib/payments/provider";
+import { formatPrice } from "@/lib/utils";
 import { env } from "@/lib/env";
 
 export const metadata = { title: "Tu ruta te espera" };
@@ -58,6 +63,8 @@ export default async function PagarPage({
   // timeout (el SSR jamás se cuelga por Haiku) y se persiste con escritura
   // CONDICIONAL (where preview is null) — cargas concurrentes no se pisan
   // y el costo queda acotado (solo el dueño autenticado llega aquí).
+  // P0: el .catch(() => null) evita que un rechazo del modelo tumbe el
+  // paywall a 500 — con preview null se degrada al esqueleto de abajo.
   let preview = intent.preview;
   if (!preview?.modules?.length) {
     const fresh = await Promise.race([
@@ -66,14 +73,16 @@ export default async function PagarPage({
         level: intent.level,
         goal: intent.goal,
         language: intent.language,
-      }),
+      }).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), 4500)),
     ]);
     if (fresh) {
+      const metaHead = intent.goal.split(".")[0] ?? "";
       preview = {
         modules: fresh.modules,
         hook: fresh.hook,
-        metaDisplay: intent.goal.split(".")[0]?.slice(0, 160) ?? "",
+        metaDisplay:
+          metaHead.length > 160 ? `${metaHead.slice(0, 159).trimEnd()}…` : metaHead,
       };
       await db
         .update(routeIntents)
@@ -91,8 +100,9 @@ export default async function PagarPage({
     (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ?? null;
 
   // Punto A (dónde está hoy) → Punto B (dónde quiere llegar) — con SUS datos.
+  // `||` (no `??`): un priorExperience vacío o de puros espacios cae al fallback.
   const puntoA =
-    intent.priorExperience?.split(".")[0]?.slice(0, 110) ??
+    intent.priorExperience?.split(".")[0]?.slice(0, 110)?.trim() ||
     `Recién empezando en ${intent.topic.toLowerCase()}`;
   const puntoB = preview?.metaDisplay || intent.goal.split(".")[0] || intent.topic;
 
@@ -110,22 +120,23 @@ export default async function PagarPage({
       </div>
 
       {sp.error === "pago" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          No pudimos iniciar el pago. Intenta de nuevo en unos segundos.
-        </p>
+        <NotaBanner tone="error" titulo="No pudimos iniciar el pago" className="mt-4">
+          No se hizo ningún cobro. Intenta de nuevo en unos segundos, o
+          escríbenos a hola@aulia.ai y lo vemos contigo.
+        </NotaBanner>
       )}
       {sp.error === "email" && (
-        <p className="mt-4 rounded-md bg-destructive/10 px-4 py-2.5 text-center text-sm font-medium text-destructive">
-          Tu correo no parece recibir mensajes (¿quedó con un error de tipeo?).
-          El procesador de pagos lo verifica para enviarte tu comprobante —
-          corrígelo en tu perfil o escríbenos a hola@aulia.ai.
-        </p>
+        <NotaBanner tone="error" titulo="Tu correo no parece recibir mensajes" className="mt-4">
+          ¿Quedó con un error de tipeo? No se hizo ningún cobro — el procesador
+          de pagos verifica tu correo para enviarte el comprobante. Corrígelo
+          en tu perfil o escríbenos a hola@aulia.ai.
+        </NotaBanner>
       )}
       {intent.status === "failed" && (
-        <p className="mt-4 rounded-md bg-accent/20 px-4 py-2.5 text-center text-sm font-medium">
+        <NotaBanner tone="aviso" className="mt-4">
           Tu pago anterior no se concretó (nada se cobró). Tu ruta sigue
           reservada — puedes intentarlo de nuevo.
-        </p>
+        </NotaBanner>
       )}
 
       {/* PUNTO A → PUNTO B: el viaje, con sus propias palabras */}
@@ -143,7 +154,9 @@ export default async function PagarPage({
         </div>
       </div>
 
-      {/* EL TEMARIO REAL, bloqueado */}
+      {/* EL TEMARIO REAL, bloqueado. Si aún no está escrito, se dice y se
+          re-consulta solo (la promesa "ves tu temario antes de pagar" no se
+          rompe en silencio). */}
       {preview?.modules?.length ? (
         <div className="ruled mt-4 rounded-xl border border-border bg-card p-4">
           <div className="flex items-center justify-between">
@@ -171,7 +184,24 @@ export default async function PagarPage({
             </li>
           </ol>
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-4">
+          <SkeletonCuaderno lineas={4} />
+          <p className="mt-2 text-center text-sm text-muted-foreground">
+            Tu temario se está escribiendo — se actualiza en unos segundos.
+          </p>
+          <AutoRefresh
+            seconds={5}
+            maxAttempts={15}
+            fallback={
+              <NotaBanner tone="aviso" className="mt-3">
+                Esto está tardando más de lo normal. Tu ruta sigue reservada —
+                escríbenos a hola@aulia.ai y te mandamos el temario al tiro.
+              </NotaBanner>
+            }
+          />
+        </div>
+      )}
 
       {/* LAS DOS OFERTAS */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -179,9 +209,9 @@ export default async function PagarPage({
         <div className="flex flex-col rounded-2xl border border-border bg-card p-5">
           <p className="font-display font-semibold">Solo esta ruta</p>
           <p className="mt-3 font-display text-3xl font-bold">
-            ${amount.toLocaleString("es-CL")}
-            <span className="ml-1 text-xs font-semibold text-muted-foreground">
-              CLP · una vez
+            {formatPrice(amount, "CLP")}
+            <span className="ml-1.5 text-xs font-semibold text-muted-foreground">
+              una vez
             </span>
           </p>
           <ul className="mt-4 flex-1 space-y-2 text-sm">
@@ -208,29 +238,38 @@ export default async function PagarPage({
           </form>
         </div>
 
-        {/* Pro — Más elegido */}
+        {/* Pro — recomendado */}
         <div className="relative flex flex-col rounded-2xl border-2 border-primary bg-card p-5 shadow-lift">
-          <span className="absolute -top-3 left-4 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-            🔥 Más elegido
-          </span>
+          <span className="tab-note absolute -top-4 left-4">recomendado ✺</span>
           <p className="font-display font-semibold">Aulia Pro</p>
           <p className="mt-3 font-display text-3xl font-bold text-primary">
-            ${pro.toLocaleString("es-CL")}
-            <span className="ml-1 text-xs font-semibold text-muted-foreground">
-              {proAutomatico ? "CLP / mes" : "CLP · por 30 días"}
+            {formatPrice(pro, "CLP")}
+            <span className="ml-1.5 text-xs font-semibold text-muted-foreground">
+              {/* WARNING: NO activar PRO_SUBSCRIPTION_ENABLED sin contrato PAT
+                  firmado (task #45); el copy "/ mes" está PROHIBIDO en modo
+                  manual (Pro = 30 días, sin renovación automática). */}
+              {proAutomatico ? "/ mes" : "por 30 días"}
             </span>
           </p>
           <ul className="mt-4 flex-1 space-y-2 text-sm">
-            {[
-              { icon: Sparkles, t: "Esta ruta queda incluida HOY" },
-              { icon: Map, t: `${env.PRO_ROUTES_PER_MONTH} rutas nuevas a tu medida cada mes` },
-              { icon: Mic, t: "Clases en vivo extra todos los meses" },
-              { icon: Library, t: "Tus rutas se encadenan en Caminos" },
-            ].map((it, i) => (
-              <li key={i} className="flex items-start gap-2.5">
-                <it.icon className="mt-0.5 size-4 shrink-0 text-primary" /> {it.t}
-              </li>
-            ))}
+            <li className="flex items-start gap-2.5">
+              <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
+              <span>
+                Esta ruta queda <span className="ink-hl">incluida</span> hoy
+              </span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <Map className="mt-0.5 size-4 shrink-0 text-primary" />
+              <span>{env.PRO_ROUTES_PER_MONTH} rutas nuevas a tu medida cada mes</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <Mic className="mt-0.5 size-4 shrink-0 text-primary" />
+              <span>120 minutos al mes de clases en vivo, con todos tus profesores</span>
+            </li>
+            <li className="flex items-start gap-2.5">
+              <Library className="mt-0.5 size-4 shrink-0 text-primary" />
+              <span>Tus rutas se encadenan en Caminos</span>
+            </li>
           </ul>
           <form action={subscribeProAction.bind(null, intent.id)} className="mt-4">
             <SubmitButton size="lg" className="w-full" pendingText="Conectando…">
@@ -245,11 +284,21 @@ export default async function PagarPage({
         </div>
       </div>
 
-      <p className="mt-4 text-center text-sm font-medium">
-        🛡️ Garantía simple: si en 7 días no es para ti, escríbenos a
-        hola@aulia.ai y te devolvemos el 100%.
-      </p>
-      <p className="mt-2 text-center text-xs text-muted-foreground">
+      {/* Banda de garantía — patrón precios.tsx, zona sobria */}
+      <div className="mt-6 flex items-start gap-3 rounded-lg border border-border bg-card p-5 shadow-soft">
+        <Seal size={16} className="mt-0.5 shrink-0 text-primary" />
+        <p className="text-sm text-muted-foreground">
+          Garantía simple: si en 7 días no es para ti, escribes a{" "}
+          <a
+            href="mailto:hola@aulia.ai"
+            className="font-medium text-foreground hover:underline"
+          >
+            hola@aulia.ai
+          </a>{" "}
+          y te devolvemos el 100%.
+        </p>
+      </div>
+      <p className="mt-3 text-center text-xs text-muted-foreground">
         Pago seguro vía {providerLabel()}. Tu ruta se empieza a generar apenas
         se confirma — y tu profesor te estará esperando.
       </p>

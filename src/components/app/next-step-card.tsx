@@ -1,5 +1,8 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles, Trophy } from "lucide-react";
+import { ArrowRight, Trophy } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Check, Spark } from "@/components/marketing/landing/icons";
 import {
   getOrCreateNextPathSuggestion,
   nextPathUrl,
@@ -27,11 +30,11 @@ export async function NextStepCard({
   if (!suggestion) return null;
 
   return (
-    <div className="mt-6 overflow-hidden rounded-xl border border-primary/30 bg-gradient-to-br from-primary/10 to-accent/10 p-6">
-      <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-primary">
-        <Sparkles className="size-3.5" /> Siguiente paso
-      </p>
-      <h2 className="mt-2 font-display text-xl font-bold tracking-tight">
+    <div className="mt-6 overflow-hidden rounded-xl border border-border bg-card p-6 shadow-soft">
+      <Badge variant="primary">
+        <Spark size={14} /> tu siguiente ruta
+      </Badge>
+      <h2 className="mt-3 font-display text-xl font-bold tracking-tight">
         {suggestion.topic}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">{suggestion.goal}</p>
@@ -52,20 +55,19 @@ export async function NextStepCard({
           {moduleTitles.slice(0, 6).map((t) => (
             <span
               key={t}
-              className="rounded-full border border-primary/20 bg-card px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-card px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground"
             >
-              ✓ {t}
+              <Check size={11} className="shrink-0 text-primary" /> {t}
             </span>
           ))}
         </div>
       )}
 
-      <Link
-        href={nextPathUrl(suggestion, pathId)}
-        className="mt-5 inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90"
-      >
-        Crear mi siguiente ruta <ArrowRight className="size-4" />
-      </Link>
+      <Button asChild size="sm" className="mt-5">
+        <Link href={nextPathUrl(suggestion, pathId)}>
+          Crear mi siguiente ruta <ArrowRight className="size-4" />
+        </Link>
+      </Button>
       <p className="mt-2 text-[11px] text-muted-foreground">
         Se genera a tu medida, construyendo sobre lo que ya dominas.
       </p>

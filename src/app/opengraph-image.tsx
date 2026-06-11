@@ -1,16 +1,19 @@
 import { ImageResponse } from "next/og";
+import { site } from "@/lib/site";
+import { formatPrice } from "@/lib/utils";
 
 /*
   OG image kraft (spec §7.3): 1200×630, fondo kraft, marca Aulia en verde
   del logo (permitido aquí: es contexto de logo), tagline con «saberlo»
   sobre trazo de resaltador, y precio + dominio abajo.
-  Tipografía del sistema (sin fetch de fonts).
+  Tipografía del sistema (sin fetch de fonts: el sistema actual funciona).
 */
+
+const precio = formatPrice(site.pricing.singlePath, "CLP");
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
-export const alt =
-  "Aulia — De querer aprenderlo a saberlo. $9.990 una vez · aulia.ai";
+export const alt = `Aulia — De querer aprenderlo a saberlo. ${precio} una vez · aulia.ai`;
 
 export default function OpengraphImage() {
   return new ImageResponse(
@@ -70,7 +73,7 @@ export default function OpengraphImage() {
             color: "#565c71",
           }}
         >
-          $9.990 una vez · aulia.ai
+          {precio} una vez · aulia.ai
         </div>
       </div>
     ),

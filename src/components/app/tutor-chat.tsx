@@ -58,7 +58,8 @@ export function TutorChat({
         const copy = [...m];
         copy[copy.length - 1] = {
           role: "assistant",
-          content: "Lo siento, hubo un error. Intenta de nuevo.",
+          content:
+            "Se nos cortó la conexión — no se perdió tu pregunta, inténtalo de nuevo.",
         };
         return copy;
       });

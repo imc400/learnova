@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { GraduationCap, Mic, Sparkles, Lock } from "lucide-react";
+import { Mic, Lock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import {
@@ -11,10 +11,15 @@ import {
   progress,
   modules,
   lessons,
+  subscriptions,
 } from "@/db/schema";
 import { getEntitlement } from "@/lib/subscription";
 import { startClassAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
+import { PageHeader } from "@/components/app/brand/page-header";
+import { EmptyState } from "@/components/app/brand/empty-state";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
+import { Button } from "@/components/ui/button";
 import { env } from "@/lib/env";
 
 export const metadata = { title: "Tus profesores" };
@@ -25,6 +30,14 @@ export const dynamic = "force-dynamic";
   cupo de minutos de clase. Pro puede tomar clases extra con cualquiera;
   Básico agotado el cupo de su ruta ve el upsell.
 */
+
+function fmtDate(d: Date | null): string {
+  if (!d) return "—";
+  // Formato es-CL corto de marca: "10 jun".
+  return d
+    .toLocaleDateString("es-CL", { day: "numeric", month: "short" })
+    .replace(/\./g, "");
+}
 
 export default async function ProfesoresPage() {
   const supabase = await createClient();
@@ -105,9 +118,26 @@ export default async function ProfesoresPage() {
   const totalByPath = new Map(totals.map((r) => [r.pathId, Number(r.total)]));
 
   const { isPro } = await getEntitlement(user.id);
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
+
+  // Ventana del pool mensual Pro: el PERÍODO pagado, no el mes calendario.
+  // No existe columna current_period_start, así que se deriva del período
+  // manual de 30 días (end − 30d). Si hubo renovación anticipada (los días
+  // se suman y el inicio derivado caería en el futuro), se usa una ventana
+  // móvil de 30 días — solo lectura, no toca pagos.
+  let periodEnd: Date | null = null;
+  if (isPro) {
+    const [sub] = await db
+      .select({ end: subscriptions.currentPeriodEnd })
+      .from(subscriptions)
+      .where(eq(subscriptions.userId, user.id))
+      .limit(1);
+    periodEnd = sub?.end ?? null;
+  }
+  const THIRTY_D = 30 * 86_400_000;
+  const fallbackStart = new Date(Date.now() - THIRTY_D);
+  const derived = periodEnd ? new Date(periodEnd.getTime() - THIRTY_D) : fallbackStart;
+  const periodStart = derived.getTime() > Date.now() ? fallbackStart : derived;
+
   const [monthRow] = isPro
     ? await db
         .select({
@@ -115,7 +145,7 @@ export default async function ProfesoresPage() {
         })
         .from(liveSessions)
         .where(
-          sql`${liveSessions.userId} = ${user.id} and ${liveSessions.createdAt} >= ${monthStart}`,
+          sql`${liveSessions.userId} = ${user.id} and ${liveSessions.createdAt} >= ${periodStart}`,
         )
     : [];
   const proMonthLeft = isPro
@@ -124,39 +154,32 @@ export default async function ProfesoresPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="flex items-center gap-3">
-        <h1 className="font-display text-2xl font-bold tracking-tight">
-          Tus profesores
-        </h1>
-        <span className="tab-note">te conocen ✺</span>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Un profesor particular por ruta — con memoria de tu avance, tus trabas
-        y tus tareas.
-      </p>
+      <PageHeader
+        nota="te conocen ✺"
+        titulo={
+          <>
+            Tus <span className="ink-hl">profesores</span>
+          </>
+        }
+        subtitulo="Un profesor IA por voz para cada ruta — con memoria de tu avance, tus trabas y tus tareas."
+      />
 
       {isPro && (
-        <p className="mt-4 rounded-md bg-primary/10 px-4 py-2.5 text-sm font-medium text-primary">
-          ⭐ Pro: te quedan {proMonthLeft} min de clases extra este mes, con
-          cualquiera de tus profesores.
-        </p>
+        <NotaBanner tone="aviso" className="mb-6">
+          Pro: te quedan {proMonthLeft} de tus {env.PRO_MONTHLY_CLASS_MINUTES}{" "}
+          minutos al mes de clases en vivo, con todos tus profesores.
+        </NotaBanner>
       )}
 
       {ready.length === 0 ? (
-        <div className="mt-8 rounded-xl border border-dashed border-border bg-card p-8 text-center">
-          <GraduationCap className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 text-sm font-medium">
-            Tu primer profesor llega con tu primera ruta.
-          </p>
-          <Link
-            href="/app/crear"
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-bold text-primary-foreground hover:bg-primary/90"
-          >
-            <Sparkles className="size-4" /> Crear mi ruta
-          </Link>
-        </div>
+        <EmptyState
+          nota="tu primer profesor viene en camino ✺"
+          titulo="Tu primer profesor llega con tu primera ruta"
+          descripcion="Cada ruta viene con su profesor IA por voz: te conoce, recuerda tu avance y te deja tareas."
+          cta={{ href: "/app/crear", label: "Diseñar mi ruta" }}
+        />
       ) : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {ready.map((p) => {
             const agent = agentByKey.get(p.cacheKey ?? `path-${p.id}`);
             const used = usedByPath.get(p.id) ?? 0;
@@ -169,7 +192,10 @@ export default async function ProfesoresPage() {
               ? routeLeft > 0 || proMonthLeft > 0
               : pct >= 40 && routeLeft > 0;
             return (
-              <div key={p.id} className="rounded-xl border border-border bg-card p-5">
+              <div
+                key={p.id}
+                className="rounded-xl border border-border bg-card p-5 shadow-soft transition-shadow hover:shadow-lift"
+              >
                 <div className="flex items-start gap-3">
                   <span className="grid size-12 shrink-0 place-items-center rounded-full border border-primary/40 bg-primary/10 font-display text-lg font-bold text-primary">
                     {(agent?.name ?? "P").replace("Profe ", "").charAt(0)}
@@ -188,10 +214,11 @@ export default async function ProfesoresPage() {
                 </p>
                 {canClass ? (
                   <>
+                    {/* Ambos cupos a la vista: el de la ruta y el pool Pro. */}
                     <p className="mt-2 text-xs tabular-nums text-muted-foreground">
-                      {routeLeft > 0
-                        ? `${routeLeft} min de clase disponibles en esta ruta`
-                        : "Corre por tu pool Pro mensual"}
+                      {isPro
+                        ? `${routeLeft} min en esta ruta · ${proMonthLeft} min de tu pool Pro del mes`
+                        : `${routeLeft} min de clase disponibles en esta ruta`}
                     </p>
                     <form action={startClassAction.bind(null, p.id, "class")} className="mt-3">
                       <SubmitButton size="sm" className="w-full" pendingText="Preparando…">
@@ -199,24 +226,39 @@ export default async function ProfesoresPage() {
                       </SubmitButton>
                     </form>
                   </>
+                ) : isPro ? (
+                  /* Pro sin minutos: nada que vender — fecha real de renovación. */
+                  <div className="mt-3 rounded-lg border-2 border-dashed border-border bg-card/60 p-3 text-center">
+                    <p className="text-xs font-medium">
+                      Usaste tus {env.PRO_MONTHLY_CLASS_MINUTES} minutos del mes —
+                      se renuevan el {periodEnd ? fmtDate(periodEnd) : "próximo período"}.
+                    </p>
+                  </div>
+                ) : pct < 40 ? (
+                  /* Ficha punteada: la clase aún no se gana. */
+                  <div className="mt-3 rounded-lg border-2 border-dashed border-border bg-card/60 p-3 text-center">
+                    <p className="hand inline-block rotate-[-1deg]">se desbloquea contigo ✺</p>
+                    <p className="mt-1 flex items-center justify-center gap-1.5 text-xs font-medium">
+                      <Lock className="size-3.5" /> Tu clase del viaje se abre al
+                      40% de avance — vas en {pct}%.
+                    </p>
+                  </div>
                 ) : (
+                  /* Básico con cupo de ruta agotado: upsell honesto a Pro. */
                   <div className="mt-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-3 text-center">
                     <p className="flex items-center justify-center gap-1.5 text-xs font-medium">
-                      <Lock className="size-3.5" />
-                      {!isPro && pct < 40
-                        ? `Tu clase del viaje se desbloquea al 40% (vas en ${pct}%)`
-                        : "Más clases con tu profesor:"}
+                      <Lock className="size-3.5" /> Más clases con tu profesor:
                     </p>
-                    <Link
-                      href="/app/planes"
-                      className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90"
+                    <Button
+                      asChild
+                      size="sm"
+                      className="mt-2 h-auto min-h-11 whitespace-normal py-2"
                     >
-                      <Sparkles className="size-3.5" /> Pro: {env.PRO_MONTHLY_CLASS_MINUTES} min/mes
-                      con todos tus profes
-                    </Link>
-                    <p className="mt-1.5 text-[11px] text-muted-foreground">
-                      o clase suelta ${env.PRICE_CLASS_CLP.toLocaleString("es-CL")} — muy pronto
-                    </p>
+                      <Link href="/app/planes">
+                        Pro: {env.PRO_MONTHLY_CLASS_MINUTES} minutos al mes de
+                        clases en vivo, con todos tus profesores
+                      </Link>
+                    </Button>
                   </div>
                 )}
               </div>

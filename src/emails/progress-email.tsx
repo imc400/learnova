@@ -2,6 +2,7 @@ import {
   Body,
   Button,
   Container,
+  Font,
   Head,
   Heading,
   Hr,
@@ -84,7 +85,7 @@ function EmailLogo() {
 
 export interface ProgressEmailProps {
   preview: string;
-  badge?: string; // "🏁 Módulo completado", "🏆 Ruta completada", "✨ Nuevo módulo"
+  badge?: string; // "Módulo completado", "Ruta completada ✺", "Nuevo módulo disponible"
   heading: string;
   intro: string;
   bullets: string[];
@@ -109,7 +110,32 @@ export function ProgressEmail({
 }: ProgressEmailProps) {
   return (
     <Html lang="es">
-      <Head />
+      <Head>
+        {/* Tipografías de marca con fallback seguro (Outlook ignora @font-face). */}
+        <Font
+          fontFamily="Fredoka"
+          fallbackFontFamily="Arial"
+          webFont={{
+            url: "https://fonts.gstatic.com/s/fredoka/v17/X7nP4b87HvSqjb_WIi2yDCRwoQ_k7367_B-i2yQag0-mac3OLyX8EemKttxNbikt.woff2",
+            format: "woff2",
+          }}
+          fontWeight={600}
+          fontStyle="normal"
+        />
+        <Font
+          fontFamily="Nunito Sans"
+          fallbackFontFamily="Arial"
+          webFont={{
+            url: "https://fonts.gstatic.com/s/nunitosans/v19/pe0TMImSLYBIv1o4X1M8ce2xCx3yop4tQpF_MeTm0lfUVwoNnq4CLz0_upHZPYsZ51Q42ptCprt1R-tQKr51.woff2",
+            format: "woff2",
+          }}
+          fontWeight={400}
+          fontStyle="normal"
+        />
+        {/* El cuaderno es kraft claro: evitar inversión de dark mode. */}
+        <meta name="color-scheme" content="light" />
+        <meta name="supported-color-schemes" content="light" />
+      </Head>
       <Preview>{preview}</Preview>
       <Body style={{ backgroundColor: palette.paper, margin: 0, padding: "24px 12px", fontFamily: "'Nunito Sans', 'Segoe UI', Arial, sans-serif" }}>
         <Container style={{ maxWidth: 520, margin: "0 auto" }}>
@@ -120,7 +146,7 @@ export function ProgressEmail({
 
           <Section style={{ backgroundColor: palette.card, borderRadius: 16, border: `1px solid ${palette.border}`, padding: "32px 28px" }}>
             {badge && (
-              <Text style={{ display: "inline-block", backgroundColor: palette.highlight, color: "#5A4A05", borderRadius: 6, padding: "4px 14px", fontSize: 13, fontWeight: 800, margin: "0 0 14px" }}>
+              <Text style={{ display: "inline-block", backgroundColor: palette.highlight, color: "#5A4A05", borderRadius: "4px 4px 4px 0", padding: "4px 14px", fontSize: 13, fontWeight: 800, margin: "0 0 14px" }}>
                 {badge}
               </Text>
             )}
@@ -157,7 +183,7 @@ export function ProgressEmail({
 
             <Button
               href={cta.url}
-              style={{ backgroundColor: palette.greenDark, color: "#FFFFFF", borderRadius: 999, padding: "12px 26px", fontSize: 15, fontWeight: 800, textDecoration: "none", display: "inline-block" }}
+              style={{ backgroundColor: palette.green, color: "#FFFFFF", borderRadius: 14, padding: "12px 26px", fontSize: 15, fontWeight: 800, textDecoration: "none", display: "inline-block", boxShadow: "0 2px 6px rgba(35, 39, 58, 0.14)" }}
             >
               {cta.label}
             </Button>

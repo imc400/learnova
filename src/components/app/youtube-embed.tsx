@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw, ExternalLink, Languages, Youtube, Clapperboard } from "lucide-react";
+import { Play } from "@/components/marketing/landing/icons";
+import { badgeVariants } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface Video {
   youtubeVideoId: string;
@@ -15,6 +18,18 @@ export interface VideoGuide {
   moments: { timestampSeconds: number; label: string }[];
 }
 
+/** Evento global de seek: el quiz cita el minuto y el player salta a él. */
+export const VIDEO_SEEK_EVENT = "aulia:video-seek";
+
+/** Pide al player de la página saltar a un segundo del video principal. */
+export function requestVideoSeek(seconds: number) {
+  window.dispatchEvent(
+    new CustomEvent<{ seconds: number }>(VIDEO_SEEK_EVENT, {
+      detail: { seconds },
+    }),
+  );
+}
+
 const LANG_NAMES: Record<string, string> = {
   es: "español",
   en: "inglés",
@@ -25,6 +40,9 @@ const LANG_NAMES: Record<string, string> = {
 };
 const langName = (code: string) =>
   LANG_NAMES[code.slice(0, 2).toLowerCase()] ?? code;
+
+export const mmss = (s: number) =>
+  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
  * Reproductor embebido oficial de YouTube (IFrame). Cumple ToS: no descarga
@@ -46,6 +64,21 @@ export function YouTubeEmbed({
 }) {
   const [idx, setIdx] = useState(0);
   const [startAt, setStartAt] = useState<number | null>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
+
+  // El quiz cita el minuto del video: al tocar el chip, el player salta ahí.
+  // El grounding se hizo sobre el video PRINCIPAL → volvemos al índice 0.
+  useEffect(() => {
+    function onSeek(e: Event) {
+      const seconds = (e as CustomEvent<{ seconds: number }>).detail?.seconds;
+      if (typeof seconds !== "number") return;
+      setIdx(0);
+      setStartAt(seconds);
+      playerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    window.addEventListener(VIDEO_SEEK_EVENT, onSeek);
+    return () => window.removeEventListener(VIDEO_SEEK_EVENT, onSeek);
+  }, []);
 
   if (videos.length === 0) {
     return (
@@ -75,12 +108,12 @@ export function YouTubeEmbed({
     params.set("autoplay", "1");
   }
 
-  const mmss = (s: number) =>
-    `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-
   return (
     <div className="flex flex-col gap-2">
-      <div className="aspect-video overflow-hidden rounded-md border border-border bg-black">
+      <div
+        ref={playerRef}
+        className="aspect-video overflow-hidden rounded-md border border-border bg-black"
+      >
         <iframe
           key={`${current.youtubeVideoId}-${startAt ?? "0"}`}
           className="size-full"
@@ -106,9 +139,12 @@ export function YouTubeEmbed({
                 type="button"
                 onClick={() => setStartAt(m.timestampSeconds)}
                 title={`Saltar a ${mmss(m.timestampSeconds)}`}
-                className="rounded-full border border-primary/30 bg-card px-2.5 py-1 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                className={cn(
+                  badgeVariants({ variant: "accent" }),
+                  "min-h-11 cursor-pointer px-3.5 text-sm transition-colors hover:bg-accent/25",
+                )}
               >
-                ▶ {mmss(m.timestampSeconds)} · {m.label}
+                <Play size={12} className="shrink-0" /> {mmss(m.timestampSeconds)} · {m.label}
               </button>
             ))}
           </div>
@@ -116,12 +152,13 @@ export function YouTubeEmbed({
       )}
 
       {mismatch && (
-        <p className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-500">
+        <p className="flex items-start gap-1.5 rounded-md bg-highlight-soft px-2.5 py-1.5 text-xs text-accent-foreground">
           <Languages className="mt-0.5 size-3.5 shrink-0" />
           <span>
             No encontramos un video en {langName(target)} para este punto; este
             está en {langName(audioLang)}. Para subtítulos en {langName(target)}:
-            toca <b>CC</b> y luego <b>⚙ → Subtítulos → Traducir automáticamente</b>.
+            toca <b>CC</b> y luego <b>Ajustes, Subtítulos, Traducir
+            automáticamente</b>.
           </span>
         </p>
       )}
@@ -132,8 +169,12 @@ export function YouTubeEmbed({
           {videos.length > 1 && (
             <button
               type="button"
-              onClick={() => setIdx((i) => (i + 1) % videos.length)}
-              className="inline-flex items-center gap-1 hover:text-foreground"
+              onClick={() => {
+                // El startAt pertenece al video principal: no contamina al alternativo.
+                setIdx((i) => (i + 1) % videos.length);
+                setStartAt(null);
+              }}
+              className="inline-flex min-h-11 items-center gap-1 hover:text-foreground"
             >
               <RefreshCw className="size-3.5" /> Otra opción
             </button>
@@ -142,7 +183,7 @@ export function YouTubeEmbed({
             href={`https://www.youtube.com/watch?v=${current.youtubeVideoId}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 hover:text-foreground"
+            className="inline-flex min-h-11 items-center gap-1 hover:text-foreground"
           >
             <ExternalLink className="size-3.5" /> Ver en YouTube
           </a>

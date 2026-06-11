@@ -7,6 +7,7 @@ import {
   Banknote,
 } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
+import { formatPrice } from "@/lib/utils";
 import {
   getAdminKpis,
   getFunnel,
@@ -16,7 +17,8 @@ import {
   getAdminPaths,
 } from "@/server/queries/admin";
 
-export const metadata = { title: "Admin · Aulia" };
+// El template del root layout ya agrega "· Aulia".
+export const metadata = { title: "Admin" };
 // Métricas siempre frescas (es la sala de control del negocio).
 export const dynamic = "force-dynamic";
 
@@ -32,7 +34,9 @@ function fmtDate(iso: string): string {
 /** Link wa.me listo para abrir conversación de remarketing. */
 function waHref(phone: string | null): string | null {
   if (!phone) return null;
-  const digits = phone.replace(/\D/g, "");
+  let digits = phone.replace(/\D/g, "");
+  // Celular chileno sin código de país ("9XXXXXXXX") → anteponer 56.
+  if (digits.length === 9 && digits.startsWith("9")) digits = `56${digits}`;
   return digits.length >= 8 ? `https://wa.me/${digits}` : null;
 }
 
@@ -54,7 +58,7 @@ export default async function AdminPage() {
     { icon: CheckCircle2, label: "Activación", value: `${kpis.activationPct}%`, sub: `${kpis.lessonsCompleted} lecciones completadas` },
     { icon: GraduationCap, label: "Clases en vivo", value: kpis.liveClasses, sub: `${kpis.liveMinutes} min hablados` },
     { icon: ShoppingCart, label: "Checkout", value: kpis.intentsTotal ? `${kpis.intentsPaid}/${kpis.intentsTotal}` : "—", sub: kpis.intentsPending ? `${kpis.intentsPending} carros abandonados` : "paywall sin tráfico aún" },
-    { icon: Banknote, label: "Ingresos", value: `$${kpis.revenueClp.toLocaleString("es-CL")}`, sub: "CLP confirmados (pagos acreditados)" },
+    { icon: Banknote, label: "Ingresos", value: formatPrice(kpis.revenueClp, "CLP"), sub: "CLP confirmados (pagos acreditados)" },
   ];
 
   const maxFunnel = Math.max(...funnel.map((f) => f.count), 1);
@@ -75,7 +79,7 @@ export default async function AdminPage() {
       {/* KPIs */}
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3">
         {kpiCards.map((k) => (
-          <div key={k.label} className="rounded-xl border border-border bg-card p-4">
+          <div key={k.label} className="rounded-xl border border-border bg-card p-4 shadow-soft">
             <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
               <k.icon className="size-3.5" /> {k.label}
             </p>
@@ -86,7 +90,7 @@ export default async function AdminPage() {
       </div>
 
       {/* Embudo */}
-      <section className="mt-8 rounded-xl border border-border bg-card p-5">
+      <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-soft">
         <h2 className="font-display text-base font-semibold">Embudo de conversión</h2>
         <div className="mt-4 space-y-2.5">
           {funnel.map((f, i) => {
@@ -118,11 +122,12 @@ export default async function AdminPage() {
       </section>
 
       {/* Serie diaria */}
-      <section className="mt-6 rounded-xl border border-border bg-card p-5">
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
         <h2 className="font-display text-base font-semibold">
           Últimos 14 días{" "}
           <span className="ml-2 text-xs font-normal text-muted-foreground">
-            ■ registros · <span className="text-primary">■</span> rutas
+            <span className="text-foreground/30">■</span> registros ·{" "}
+            <span className="text-primary">■</span> rutas
           </span>
         </h2>
         <div className="mt-4 flex h-28 items-end gap-1.5">
@@ -148,8 +153,8 @@ export default async function AdminPage() {
 
       {/* Carros abandonados */}
       <section className="mt-6 rounded-xl border border-accent bg-accent/10 p-5">
-        <h2 className="font-display text-base font-semibold">
-          🛒 Carros abandonados ({abandoned.length})
+        <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+          <ShoppingCart className="size-4 text-primary" /> Carros abandonados ({abandoned.length})
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
           Completaron el formulario pero no pagaron. Contacto directo para remarketing.
@@ -200,7 +205,7 @@ export default async function AdminPage() {
       </section>
 
       {/* Usuarios */}
-      <section className="mt-6 rounded-xl border border-border bg-card p-5">
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
         <h2 className="font-display text-base font-semibold">Usuarios recientes</h2>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
@@ -246,7 +251,7 @@ export default async function AdminPage() {
       </section>
 
       {/* Rutas recientes */}
-      <section className="mt-6 rounded-xl border border-border bg-card p-5">
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
         <h2 className="font-display text-base font-semibold">Rutas recientes</h2>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
@@ -274,7 +279,11 @@ export default async function AdminPage() {
                             : "bg-muted text-muted-foreground"
                       }`}
                     >
-                      {p.status}
+                      {p.status === "ready"
+                        ? "lista"
+                        : p.status === "failed"
+                          ? "falló"
+                          : "generando"}
                     </span>
                   </td>
                   <td className="py-2 pr-3 text-right tabular-nums">{p.generationProgress}%</td>

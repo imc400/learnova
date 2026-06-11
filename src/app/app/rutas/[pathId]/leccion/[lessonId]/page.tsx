@@ -8,7 +8,10 @@ import {
   ListChecks,
   Loader2,
 } from "lucide-react";
+import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { lessons, modules, learningPaths } from "@/db/schema";
 import { getLessonDetail } from "@/server/queries/lessons";
 import { completeLessonAction } from "@/server/actions/quiz";
 import { RouteProgressLive } from "@/components/app/route-progress-live";
@@ -18,6 +21,29 @@ import { TutorChat } from "@/components/app/tutor-chat";
 import { SubmitButton } from "@/components/app/submit-button";
 import { RichText } from "@/components/app/rich-text";
 import type { LessonContent } from "@/lib/ai/schemas";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ pathId: string; lessonId: string }>;
+}) {
+  const { lessonId } = await params;
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { title: "Lección" };
+  const [row] = await db
+    .select({ lessonTitle: lessons.title, pathTitle: learningPaths.title })
+    .from(lessons)
+    .innerJoin(modules, eq(modules.id, lessons.moduleId))
+    .innerJoin(learningPaths, eq(learningPaths.id, modules.pathId))
+    .where(and(eq(lessons.id, lessonId), eq(learningPaths.userId, user.id)))
+    .limit(1);
+  return {
+    title: row ? `${row.lessonTitle} · «${row.pathTitle}»` : "Lección",
+  };
+}
 
 export default async function LessonPage({
   params,
@@ -100,14 +126,14 @@ export default async function LessonPage({
             {content.sections.map((s, i) => (
               <section key={i}>
                 <h2 className="font-display text-xl font-semibold">{s.heading}</h2>
-                <p className="mt-2 whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">
                   <RichText text={s.body} />
                 </p>
               </section>
             ))}
 
             {content.keyTakeaways.length > 0 && (
-              <div className="rounded-lg border border-border bg-card p-5">
+              <div className="rounded-lg border border-border bg-card p-5 shadow-soft">
                 <h3 className="flex items-center gap-2 font-display font-semibold">
                   <Lightbulb className="size-5 text-accent" /> Puntos clave
                 </h3>
@@ -125,7 +151,7 @@ export default async function LessonPage({
             )}
 
             {content.practice && (
-              <div className="rounded-lg border border-primary/30 bg-primary/5 p-5">
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-5 shadow-soft">
                 <h3 className="flex items-center gap-2 font-display font-semibold">
                   <ListChecks className="size-5 text-primary" /> Practica
                 </h3>
@@ -142,8 +168,8 @@ export default async function LessonPage({
               Esta lección se está generando…
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Aparecerá aquí en cuanto esté lista (unos segundos). No necesitas
-              recargar.
+              Aparecerá aquí en unos minutos — te avisamos al correo. No
+              necesitas recargar.
             </p>
             {/* Auto-refresca la página hasta que llegue el contenido. */}
             <RouteProgressLive pathId={pathId} showBanner={false} />
@@ -158,7 +184,11 @@ export default async function LessonPage({
               Aprobar el quiz (60%+) completa la lección y suma XP.
             </p>
             <div className="mt-4">
-              <Quiz quizId={detail.quiz.id} questions={clientQuestions} />
+              <Quiz
+                quizId={detail.quiz.id}
+                questions={clientQuestions}
+                hasVideo={detail.videos.length > 0}
+              />
             </div>
           </div>
         )}
@@ -189,9 +219,9 @@ export default async function LessonPage({
         <TutorChat
           context={tutorContext}
           suggestions={[
-            "Explícame este tema con un ejemplo simple",
+            "¿Me lo explicas con un ejemplo simple?",
             "No entendí los puntos clave, ¿me los aclaras?",
-            "Dame un ejercicio para practicar",
+            "Dame un ejercicio cortito para practicar",
           ]}
         />
       </aside>

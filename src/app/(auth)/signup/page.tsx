@@ -12,7 +12,8 @@ export default function SignupPage() {
           Crea tu cuenta
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Empieza gratis. Tu primera ruta a medida en minutos.
+          Crea tu cuenta y diseña tu ruta. Ves la estructura de tu temario
+          completo antes de pagar.
         </p>
       </div>
       <Suspense fallback={null}>

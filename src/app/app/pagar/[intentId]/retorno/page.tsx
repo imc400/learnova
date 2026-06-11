@@ -6,10 +6,26 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { routeIntents } from "@/db/schema";
 import { AutoRefresh } from "@/components/app/auto-refresh";
+import { NotaBanner } from "@/components/app/brand/nota-banner";
+import { CelebracionStickers } from "@/components/app/brand/celebracion-stickers";
+import { Button } from "@/components/ui/button";
 
 export const metadata = { title: "Confirmando tu pago" };
 // El estado cambia vía webhook: esta página SIEMPRE consulta fresco.
 export const dynamic = "force-dynamic";
+
+/** Tope del polling: ~15 intentos; después, banner de calma (nunca sugerir re-pagar). */
+function DemoraBanner() {
+  return (
+    <NotaBanner tone="aviso" className="mt-6 text-left">
+      Esto está tardando más de lo normal — tu pago está a salvo. Escríbenos a{" "}
+      <a href="mailto:hola@aulia.ai" className="font-medium text-foreground hover:underline">
+        hola@aulia.ai
+      </a>{" "}
+      y lo activamos al tiro.
+    </NotaBanner>
+  );
+}
 
 /**
  * Retorno desde Flow. El webhook (server-to-server) es quien confirma y crea
@@ -47,7 +63,7 @@ export default async function RetornoPage({
           Flow nos confirma en segundos. Apenas llegue, tu ruta se empieza a
           generar sola — esta página se actualiza automáticamente.
         </p>
-        <AutoRefresh seconds={4} />
+        <AutoRefresh seconds={4} maxAttempts={15} fallback={<DemoraBanner />} />
         <p className="mt-6 text-xs text-muted-foreground">
           ¿No pagaste todavía?{" "}
           <Link href={`/app/pagar/${intentId}`} className="font-medium text-primary hover:underline">
@@ -66,7 +82,16 @@ export default async function RetornoPage({
         <h1 className="mt-4 font-display text-xl font-semibold">
           ¡Pago confirmado! Preparando tu ruta…
         </h1>
-        <AutoRefresh seconds={3} />
+        <p className="mt-2 text-sm text-muted-foreground">
+          Tu temario aparece al tiro; las lecciones se escriben solas y te
+          avisamos al correo.
+        </p>
+        <CelebracionStickers
+          animar
+          className="justify-center"
+          stickers={[{ contenido: <>Pago confirmado</> }]}
+        />
+        <AutoRefresh seconds={3} maxAttempts={15} fallback={<DemoraBanner />} />
       </div>
     );
   }
@@ -74,28 +99,25 @@ export default async function RetornoPage({
   if (intent.status === "failed") {
     return (
       <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-8 text-center">
-        <AlertTriangle className="mx-auto size-8 text-accent-foreground" />
+        <AlertTriangle className="mx-auto size-8 text-destructive" />
         <h1 className="mt-4 font-display text-xl font-semibold">
           El pago no se concretó
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Fue rechazado o anulado — nada se cobró. Tu ruta sigue reservada.
         </p>
-        <Link
-          href={`/app/pagar/${intentId}`}
-          className="mt-4 inline-block rounded-full bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground hover:bg-primary/90"
-        >
-          Reintentar el pago
-        </Link>
+        <Button asChild className="mt-4">
+          <Link href={`/app/pagar/${intentId}`}>Reintentar el pago</Link>
+        </Button>
       </div>
     );
   }
 
   return (
     <div className="mx-auto max-w-md rounded-2xl border border-border bg-card p-8 text-center">
-      <AlertTriangle className="mx-auto size-8 text-accent-foreground" />
+      <AlertTriangle className="mx-auto size-8 text-destructive" />
       <p className="mt-4 text-sm text-muted-foreground">
-        Este pago ya no está disponible.{" "}
+        Este enlace ya no está activo.{" "}
         <Link href="/app/crear" className="font-medium text-primary hover:underline">
           Crear una ruta
         </Link>

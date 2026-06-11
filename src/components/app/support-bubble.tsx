@@ -16,8 +16,10 @@ interface Msg {
 const GREETING: Msg = {
   role: "assistant",
   content:
-    "¡Hola! Soy el asistente de Aulia 👋 ¿Tienes dudas sobre tu ruta, las clases con tu profesor o los pagos? Pregúntame lo que quieras.",
+    "¡Hola! Soy la IA de soporte de Aulia. ¿Dudas con tu ruta, tus clases o un pago? Pregúntame no más.",
 };
+
+const FALLBACK = "Se nos cortó — escríbenos a hola@aulia.ai y lo vemos al tiro.";
 
 export function SupportBubble() {
   const [open, setOpen] = useState(false);
@@ -25,10 +27,22 @@ export function SupportBubble() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
+
+  // Al abrir: foco al input. Escape cierra desde cualquier parte del panel.
+  useEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const send = async () => {
     const text = input.trim();
@@ -46,13 +60,10 @@ export function SupportBubble() {
       const data = (await res.json()) as { reply?: string };
       setMessages((m) => [
         ...m,
-        { role: "assistant", content: data.reply ?? "Escríbenos a hola@aulia.ai 🙌" },
+        { role: "assistant", content: data.reply ?? FALLBACK },
       ]);
     } catch {
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: "Se cortó la conexión. Escríbenos a hola@aulia.ai y te ayudamos." },
-      ]);
+      setMessages((m) => [...m, { role: "assistant", content: FALLBACK }]);
     } finally {
       setSending(false);
     }
@@ -62,8 +73,12 @@ export function SupportBubble() {
     <>
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-24 right-4 z-50 flex h-[28rem] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lift">
-          <div className="flex items-center justify-between bg-primary px-4 py-3 text-primary-foreground">
+        <div
+          role="dialog"
+          aria-label="Chat de soporte de Aulia"
+          className="fixed bottom-24 right-4 z-50 flex h-[28rem] max-h-[min(28rem,calc(100dvh-7rem))] w-[calc(100vw-2rem)] max-w-sm flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-lift"
+        >
+          <div className="flex items-center justify-between bg-primary px-4 py-2 text-primary-foreground">
             <div>
               <p className="font-display text-sm font-bold">Soporte Aulia</p>
               <p className="text-xs opacity-80">Respuesta al instante</p>
@@ -71,13 +86,13 @@ export function SupportBubble() {
             <button
               onClick={() => setOpen(false)}
               aria-label="Cerrar chat"
-              className="rounded-full p-1 hover:bg-white/15"
+              className="grid size-11 place-items-center rounded-full hover:bg-white/15"
             >
               <X className="size-4" />
             </button>
           </div>
 
-          <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4">
+          <div ref={listRef} aria-live="polite" className="flex-1 space-y-3 overflow-y-auto p-4">
             {messages.map((m, i) => (
               <div
                 key={i}
@@ -102,9 +117,10 @@ export function SupportBubble() {
               e.preventDefault();
               void send();
             }}
-            className="flex items-center gap-2 border-t border-border p-3"
+            className="flex items-center gap-2 border-t border-border p-3 pb-1.5"
           >
             <input
+              ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder="Escribe tu duda…"
@@ -115,11 +131,17 @@ export function SupportBubble() {
               type="submit"
               disabled={sending || !input.trim()}
               aria-label="Enviar"
-              className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
+              className="grid size-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"
             >
               <Send className="size-4" />
             </button>
           </form>
+          <p className="px-4 pb-2 text-center text-[11px] text-muted-foreground">
+            Hay un humano detrás:{" "}
+            <a href="mailto:hola@aulia.ai" className="font-medium text-primary hover:underline">
+              hola@aulia.ai
+            </a>
+          </p>
         </div>
       )}
 
