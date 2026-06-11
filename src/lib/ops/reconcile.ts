@@ -1,8 +1,9 @@
 import crypto from "node:crypto";
 import { and, eq, isNull, lt, gt, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { routeIntents, learningPaths, emailOutbox } from "@/db/schema";
+import { routeIntents, learningPaths, emailOutbox, pathPurchases } from "@/db/schema";
 import { confirmIntentPaid } from "@/lib/payments/confirm-intent";
+import { confirmProMonthPaid, markProMonthFailed } from "@/lib/payments/confirm-pro";
 import { enqueuePathGeneration } from "@/lib/generation/run";
 import { activeProvider } from "@/lib/payments/provider";
 import { alertFounder } from "@/lib/ops/alert";
@@ -10,18 +11,27 @@ import { env } from "@/lib/env";
 
 /*
   Reconciliación (E-P0.3): "dinero cobrado sin producto" pasa de invisible a
-  auto-reparado en ≤5 minutos. Los 6 pasos de la auditoría de robustez:
+  auto-reparado en ≤5 minutos. Los pasos de la auditoría de robustez:
 
-  1. Intent 'paid' SIN path → re-llamar confirmIntentPaid (es claimable en ese
-     estado: FOR UPDATE + claim atómico lo hacen seguro ante concurrencia).
-  2. Intent 'pending_payment' >15 min → consultar AL PROVEEDOR (webhook
-     perdido): si Flow/MP dicen pagado, confirmar nosotros.
-  3. Ruta 'draft' >10 min → enqueuePathGeneration (idempotente).
-  4. Ruta 'generating' >50 min → re-enqueue (resume vía lesson_content_cache);
-     >110 min (2º strike: sobrevivió a una ventana de re-enqueue) → 'failed'.
-  5. Ruta 'ready' con progress<100 y quieta >30 min → re-enqueue (rellena).
-  6. email_outbox pending/failed quieto >10 min → re-disparar el task (cierra
-     el hueco de enqueue.ts cuando tasks.trigger lanzó tras el INSERT).
+  1.  Intent 'paid' SIN path → re-llamar confirmIntentPaid (es claimable en ese
+      estado: FOR UPDATE + claim atómico lo hacen seguro ante concurrencia).
+  2.  Intent 'pending_payment' >15 min → consultar AL PROVEEDOR (webhook
+      perdido): si Flow/MP dicen pagado, confirmar nosotros.
+  2b. Compra Pro manual (prom_<purchaseId>) 'pending' >15 min → consultar a
+      Flow: pagada → confirmProMonthPaid (idempotente); rechazada/anulada →
+      markProMonthFailed. Sin esto, el ticket más alto del negocio ($24.990)
+      quedaba cobrado sin Pro si webhook Y retorno del navegador se perdían.
+  3.  Ruta 'draft' >10 min → enqueuePathGeneration (idempotente).
+  4.  Ruta 'generating' >50 min → strike counter PERSISTIDO
+      (generation_requeues): strike 1 = re-enqueue (resume vía
+      lesson_content_cache); strike >=2 = 'failed' + alerta. El viejo umbral
+      por minutos era inalcanzable: runPathGeneration resetea
+      generation_started_at en cada run.
+  4b. Ruta 'generating' que sale de la ventana de 48 h → 'failed' + alerta
+      crítica (ninguna ruta pagada queda en limbo eterno sin botón Reintentar).
+  5.  Ruta 'ready' con progress<100 y quieta >30 min → re-enqueue (rellena).
+  6.  email_outbox pending/failed quieto >10 min → re-disparar el task (cierra
+      el hueco de enqueue.ts cuando tasks.trigger lanzó tras el INSERT).
 
   La invocan DOS disparadores en dominios de fallo distintos: el cron de
   Trigger.dev (src/trigger/reconcile.ts) y un Vercel Cron vía
@@ -36,9 +46,11 @@ import { env } from "@/lib/env";
 export interface ReconcileReport {
   paidSinRuta: number;
   webhooksPerdidosConfirmados: number;
+  proWebhooksPerdidosConfirmados: number;
   draftsReencoladas: number;
   generandoReencoladas: number;
   generandoAFailed: number;
+  generandoExpiradas48h: number;
   readyIncompletasReencoladas: number;
   outboxReintentados: number;
   errores: string[];
@@ -55,10 +67,12 @@ function flowSign(params: Record<string, string>, secretKey: string): string {
   return crypto.createHmac("sha256", secretKey).update(toSign).digest("hex");
 }
 
-/** Estado en Flow por commerceOrder (`intent_<id>`). null = sin respuesta útil. */
+/** Estado en Flow por commerceOrder (`intent_<id>` / `prom_<id>`).
+ *  null = sin respuesta útil. `status` crudo de Flow para que el caller
+ *  distinga rechazado/anulado (3/4) de simplemente pendiente (1). */
 async function flowStatusByCommerceId(
   commerceId: string,
-): Promise<{ paid: boolean; amount: number } | null> {
+): Promise<{ paid: boolean; status: number | null; amount: number } | null> {
   if (!env.FLOW_API_KEY || !env.FLOW_SECRET_KEY) return null;
   try {
     const params: Record<string, string> = { apiKey: env.FLOW_API_KEY, commerceId };
@@ -70,7 +84,7 @@ async function flowStatusByCommerceId(
     if (!res.ok) return null; // típicamente 400 = orden no existe en Flow
     const j = (await res.json()) as { status?: number; amount?: string };
     // Flow: 1 pendiente · 2 pagado · 3 rechazado · 4 anulado
-    return { paid: j.status === 2, amount: Number(j.amount ?? 0) };
+    return { paid: j.status === 2, status: j.status ?? null, amount: Number(j.amount ?? 0) };
   } catch {
     return null;
   }
@@ -146,9 +160,11 @@ export async function runReconciliation(): Promise<ReconcileReport> {
   const report: ReconcileReport = {
     paidSinRuta: 0,
     webhooksPerdidosConfirmados: 0,
+    proWebhooksPerdidosConfirmados: 0,
     draftsReencoladas: 0,
     generandoReencoladas: 0,
     generandoAFailed: 0,
+    generandoExpiradas48h: 0,
     readyIncompletasReencoladas: 0,
     outboxReintentados: 0,
     errores: [],
@@ -219,6 +235,57 @@ export async function runReconciliation(): Promise<ReconcileReport> {
     report.errores.push(`paso2: ${String(e).slice(0, 150)}`);
   }
 
+  // 2b) Webhook perdido de compras Pro manuales (commerceOrder `prom_<id>`):
+  // si Flow cobró y NI el webhook NI /api/flow/pro-return aterrizaron (usuario
+  // cerró el navegador), path_purchases queda 'pending' eterno — $24.990
+  // cobrados sin Pro, intent del paywall sin convertir, cero alertas. Las
+  // compras Pro son Flow-only (provider hardcodeado), así que basta Flow.
+  try {
+    const proPendientes = await db
+      .select({ id: pathPurchases.id, amount: pathPurchases.amount })
+      .from(pathPurchases)
+      .where(
+        and(
+          eq(pathPurchases.kind, "pro_month"),
+          eq(pathPurchases.status, "pending"),
+          lt(pathPurchases.createdAt, sql`now() - interval '15 minutes'`),
+          gt(pathPurchases.createdAt, sql`now() - interval '48 hours'`),
+        ),
+      )
+      .orderBy(sql`${pathPurchases.createdAt} desc`)
+      .limit(10);
+    for (const purchase of proPendientes) {
+      try {
+        const flow = await flowStatusByCommerceId(`prom_${purchase.id}`);
+        if (!flow) continue; // sin respuesta útil — lo retoma el próximo ciclo
+        if (flow.paid) {
+          // Idempotente (FOR UPDATE + claim por status); al activar convierte
+          // internamente el intent pendiente del paywall.
+          await confirmProMonthPaid({
+            purchaseId: purchase.id,
+            chargedAmountClp: flow.amount,
+          });
+          report.proWebhooksPerdidosConfirmados++;
+          await alertFounder({
+            severidad: "warning",
+            titulo: `Webhook Pro perdido recuperado: ${purchase.id.slice(0, 8)}`,
+            detalle:
+              "Flow reporta la compra pro_month como pagada, pero ni el webhook ni el retorno del navegador la confirmaron. La reconciliación activó el Pro (idempotente) y convirtió el intent pendiente si lo había.",
+            contexto: { purchaseId: purchase.id, montoFlowClp: flow.amount },
+          });
+        } else if (flow.status === 3 || flow.status === 4) {
+          // Rechazado/anulado en Flow → cerrar también ese limbo (solo pasa
+          // de 'pending' a 'failed'; nunca pisa una compra ya pagada).
+          await markProMonthFailed(purchase.id);
+        }
+      } catch (e) {
+        report.errores.push(`pro-pending ${purchase.id}: ${String(e).slice(0, 150)}`);
+      }
+    }
+  } catch (e) {
+    report.errores.push(`paso2b: ${String(e).slice(0, 150)}`);
+  }
+
   // 3) Rutas 'draft' viejas: el enqueue post-creación murió.
   try {
     const drafts = await db
@@ -251,9 +318,19 @@ export async function runReconciliation(): Promise<ReconcileReport> {
     report.errores.push(`paso3: ${String(e).slice(0, 150)}`);
   }
 
-  // 4) 'generating' colgadas. maxDuration del task es 45 min: >50 min = run
-  // muerto (re-enqueue resume vía caché); >110 min = ya sobrevivió a un
-  // re-enqueue de este cron → failed + alerta (el botón Reintentar queda).
+  // 4) 'generating' colgadas — strike counter PERSISTIDO (generation_requeues).
+  // maxDuration del task es 45 min: >50 min sin avance = run muerto. El viejo
+  // criterio ">110 min = failed" era inalcanzable cuando el re-run SÍ
+  // arrancaba: runPathGeneration resetea generation_started_at al inicio de
+  // CADA run, así que el reloj volvía a cero y el ciclo re-encolaba para
+  // siempre (≈50 runs en 48 h quemando tokens y cuota de YouTube). El
+  // contador NO se resetea entre runs: strike 1 = re-enqueue (resume vía
+  // lesson_content_cache); strike >=2 = failed + alerta (botón Reintentar).
+  // TODO(run.ts — otro agente está en ese archivo): cuando runPathGeneration
+  // marque 'failed' en su catch (~línea 883), resetear generation_requeues a 0
+  // igual que aquí, para que el Reintentar manual parta con ciclo limpio.
+  // runPathGeneration NO debe tocar generation_requeues en ningún otro punto
+  // (el diseño exige que el contador sobreviva al reset de started_at).
   try {
     const colgadas = await db
       .select({
@@ -274,20 +351,61 @@ export async function runReconciliation(): Promise<ReconcileReport> {
         ? Math.round((Date.now() - p.startedAt.getTime()) / 60_000)
         : null;
       try {
-        if (minutos !== null && minutos > 110) {
+        // CLAIM atómico: incrementa el strike Y refresca generation_started_at
+        // en la misma sentencia. Los DOS disparadores (cron de Trigger cada
+        // 5 min + Vercel Cron cada 10 min) pueden ver la misma ruta colgada;
+        // el segundo ya no matchea el WHERE (started_at quedó fresco) → ni
+        // doble strike ni doble run.
+        const [claimed] = await db
+          .update(learningPaths)
+          .set({
+            generationRequeues: sql`${learningPaths.generationRequeues} + 1`,
+            generationStartedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(learningPaths.id, p.id),
+              eq(learningPaths.status, "generating"),
+              lt(learningPaths.generationStartedAt, sql`now() - interval '50 minutes'`),
+            ),
+          )
+          .returning({ requeues: learningPaths.generationRequeues });
+        if (!claimed) continue; // el otro disparador la reclamó en esta ventana
+
+        if (claimed.requeues >= 2) {
+          // 2º strike: ya sobrevivió a un re-enqueue completo → failed real.
+          // El contador vuelve a 0 para que el Reintentar manual (ops.ts pasa
+          // failed → generating) arranque un ciclo de strikes limpio.
           await db
             .update(learningPaths)
-            .set({ status: "failed", updatedAt: new Date() })
+            .set({ status: "failed", generationRequeues: 0, updatedAt: new Date() })
             .where(and(eq(learningPaths.id, p.id), eq(learningPaths.status, "generating")));
           report.generandoAFailed++;
           await alertFounder({
             severidad: "critical",
             titulo: `Generación colgada marcada failed: ${p.id.slice(0, 8)}`,
             detalle:
-              "La ruta llevaba >110 min en generating y ya había sobrevivido a un re-enqueue (2º strike). Quedó en failed: el cliente ve el botón Reintentar y en admin está el replay.",
-            contexto: { pathId: p.id, minutosColgada: minutos },
+              "La ruta acumuló 2 strikes de re-enqueue (generation_requeues): el run re-encolado arrancó y volvió a morir. Quedó en failed: el cliente ve el botón Reintentar y en admin está el replay.",
+            contexto: { pathId: p.id, strikes: claimed.requeues, minutosColgada: minutos },
           });
+        } else if (env.TRIGGER_SECRET_KEY) {
+          // 1er strike: re-enqueue directo con idempotencyKey (cinturón extra
+          // al claim: si tasks.trigger se duplicara, Trigger.dev dedupea). TTL
+          // corto: el mismo strike re-armado tras un failed+retry (contador
+          // reseteado) genera la misma key, y para entonces ya expiró.
+          const { tasks } = await import("@trigger.dev/sdk");
+          await tasks.trigger(
+            "generate-path",
+            { pathId: p.id },
+            {
+              idempotencyKey: `reconcile-gen-${p.id}-s${claimed.requeues}`,
+              idempotencyKeyTTL: "1h",
+            },
+          );
+          report.generandoReencoladas++;
         } else {
+          // Dev sin Trigger: enqueuePathGeneration cae al modo inline.
           await enqueuePathGeneration(p.id);
           report.generandoReencoladas++;
         }
@@ -297,6 +415,36 @@ export async function runReconciliation(): Promise<ReconcileReport> {
     }
   } catch (e) {
     report.errores.push(`paso4: ${String(e).slice(0, 150)}`);
+  }
+
+  // 4b) Limbo post-48h: el paso 4 filtra por createdAt > now()-48h, así que
+  // una 'generating' que cruza la ventana quedaría eterna — sin failed, sin
+  // botón Reintentar, sin alerta, con dinero cobrado. Barrido terminal: failed
+  // + alerta crítica. (Set pequeñísimo por diseño: el paso 4 las resuelve
+  // antes; esto es la red de seguridad, no el camino feliz.)
+  try {
+    const expiradas = await db
+      .update(learningPaths)
+      .set({ status: "failed", generationRequeues: 0, updatedAt: new Date() })
+      .where(
+        and(
+          eq(learningPaths.status, "generating"),
+          lt(learningPaths.createdAt, sql`now() - interval '48 hours'`),
+        ),
+      )
+      .returning({ id: learningPaths.id });
+    for (const p of expiradas) {
+      report.generandoExpiradas48h++;
+      await alertFounder({
+        severidad: "critical",
+        titulo: `Ruta >48h en generating cerrada como failed: ${p.id.slice(0, 8)}`,
+        detalle:
+          "La ruta salió de la ventana de reconciliación de 48 h sin terminar de generarse — esto NO debería pasar (el paso 4 debió resolverla antes). Quedó en failed para que el cliente recupere el botón Reintentar; revisar el historial de runs en Trigger.dev.",
+        contexto: { pathId: p.id },
+      });
+    }
+  } catch (e) {
+    report.errores.push(`paso4b: ${String(e).slice(0, 150)}`);
   }
 
   // 5) 'ready' incompletas y quietas: el onFailure las respeta a propósito —
@@ -367,9 +515,11 @@ export async function runReconciliation(): Promise<ReconcileReport> {
   const total =
     report.paidSinRuta +
     report.webhooksPerdidosConfirmados +
+    report.proWebhooksPerdidosConfirmados +
     report.draftsReencoladas +
     report.generandoReencoladas +
     report.generandoAFailed +
+    report.generandoExpiradas48h +
     report.readyIncompletasReencoladas +
     report.outboxReintentados;
   if (total > 0 || report.errores.length > 0) {

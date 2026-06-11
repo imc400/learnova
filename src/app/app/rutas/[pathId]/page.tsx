@@ -199,7 +199,16 @@ export default async function PathPage({
           sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
         })
         .from(liveSessions)
-        .where(and(eq(liveSessions.userId, user.id), eq(liveSessions.pathId, pathId)));
+        .where(
+          and(
+            eq(liveSessions.userId, user.id),
+            eq(liveSessions.pathId, pathId),
+            // Misma regla que el cupo REAL (usedClassMinutes en actions/live):
+            // la inducción (kind='induction') va FUERA del cupo — sin este
+            // filtro el banner decía "te quedan 0 min" a quien sí tenía clase.
+            eq(liveSessions.kind, "class"),
+          ),
+        );
       const left = Math.max(
         0,
         env.CLASS_MINUTES_PER_ROUTE - Math.ceil(Number(used?.sec ?? 0) / 60),

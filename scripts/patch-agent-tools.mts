@@ -4,10 +4,14 @@
     systemPrompt en BD con el builder actual (avisos [SISTEMA], tools nuevas).
   - --secure: además migra el agente al modo seguro — initiation webhook
     (/api/live/initiation) + overrides cliente APAGADOS + corte server-side
-    de 31 min. Requiere ELEVENLABS_WEBHOOK_SECRET y NEXT_PUBLIC_SITE_URL.
-    ⚠️ Rollout agente por agente: usar --agent y validar una clase de prueba
-    antes de migrar el resto (el aula deja de mandar overrides SOLO cuando
-    ELEVENLABS_WEBHOOK_SECRET está seteada en Vercel — coordinar ambos pasos).
+    de 31 min. Requiere ELEVENLABS_WEBHOOK_SECRET y NEXT_PUBLIC_SITE_URL de
+    PRODUCCIÓN (con URL localhost el guard de secureInitiationEnabled aborta:
+    el webhook quedaría horneado apuntando a localhost = clases rotas).
+    ⚠️ ORDEN del rollout: primero setear ELEVENLABS_WEBHOOK_SECRET en Vercel
+    (mismo valor que usará este script) + deploy, DESPUÉS parchear agente por
+    agente (--agent) validando una clase de prueba. El aula detecta el modo
+    POR AGENTE leyendo su config real en ElevenLabs: los no parcheados siguen
+    en modo legado completo (overrides) aunque la env ya esté seteada.
   - --agent <elevenlabs_agent_id>: limita el parcheo a UN agente.
 
   ⚠️ NUNCA toca tts.voice_id: las voces de los agentes existentes fueron

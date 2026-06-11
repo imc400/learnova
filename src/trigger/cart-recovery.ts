@@ -21,7 +21,12 @@ import { enqueueProgressEmail } from "@/lib/email/enqueue";
   Ventanas anchas (no exactas) para sobrevivir corridas perdidas del cron.
 
   GATING (decisión fundador): con LIFECYCLE_EMAILS_ENABLED != "true" el cron
-  corre y loguea cuántos encolaría, pero NO encola nada.
+  corre y loguea cuántos encolaría, pero NO encola nada. OJO: este cron corre
+  EN el worker de Trigger.dev y syncEnvVars (trigger.config.ts) solo sube las
+  envs EN CADA DEPLOY — encender/apagar sin deploy requiere cambiar la
+  variable en el dashboard de Trigger.dev (y en Vercel para la app).
+  process.ts re-chequea el flag AL ENVIAR (kill-switch real: apaga también lo
+  ya encolado). Checklist completo: docs/runbook-lifecycle-emails.md.
 */
 
 const MAX_AGE_HOURS = 49; // tras ~2 días el carro está frío; no perseguimos más
@@ -72,7 +77,7 @@ export const cartRecoveryTask = schedules.task({
     if (!enabled) {
       const t1 = touches.filter((t) => t.touch === "1h").length;
       console.log(
-        `[lifecycle] LIFECYCLE_EMAILS_ENABLED=false — encolaría ${touches.length} cart_recovery (T+1h: ${t1}, T+24h: ${touches.length - t1}). Nada se encoló; el fundador enciende la env tras aprobar los copys.`,
+        `[lifecycle] LIFECYCLE_EMAILS_ENABLED=false — encolaría ${touches.length} cart_recovery (T+1h: ${t1}, T+24h: ${touches.length - t1}). Nada se encoló; para encender sin deploy la env se cambia en el dashboard de Trigger.dev (y en Vercel) — ver docs/runbook-lifecycle-emails.md.`,
       );
       return { gated: true, candidates: touches.length };
     }

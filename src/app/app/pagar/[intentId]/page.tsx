@@ -19,6 +19,8 @@ import { routeIntents, skeletonCache } from "@/db/schema";
 import { startIntentCheckoutAction } from "@/server/actions/checkout";
 import { subscribeProAction } from "@/server/actions/subscription";
 import { generateRoutePreview } from "@/lib/ai/wizard";
+import { PROMPT_VERSION } from "@/lib/ai/prompts";
+import { skeletonCacheKeyCandidates } from "@/lib/generation/run";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Badge } from "@/components/ui/badge";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
@@ -68,29 +70,32 @@ export default async function PagarPage({
   // no se pisan y el costo queda acotado (solo el dueño autenticado llega).
   let preview = intent.preview;
   if (!preview?.modules?.length) {
-    // Candidatas de key, de la más específica a la legacy: canónica+variant
-    // (formato final de Track A), canónica a secas, y la derivación cruda
-    // histórica (con la que se escribió el canon pre-existente, p.ej. el de
-    // la demo pre-calentada). La primera que exista en skeleton_cache gana.
+    // Candidatas de key, de la más específica a la legacy — la MISMA lista y
+    // precedencia que usa el pipeline (skeletonCacheKeyCandidates, run.ts):
+    // canónica+variant (formato final de Track A), canónica a secas, slug
+    // normalizado (cuando el intent no trae canonical_topic, p.ej. el flujo
+    // "siguiente ruta") y la derivación cruda histórica (con la que se
+    // escribió el canon pre-existente, p.ej. el de la demo pre-calentada).
+    // La primera que exista en skeleton_cache gana → el temario mostrado es
+    // EXACTAMENTE el que el pipeline servirá tras pagar.
     const wa = intent.wizardAnswers as { variant?: string | null } | null;
     const variant = typeof wa?.variant === "string" && wa.variant ? wa.variant : null;
-    const suffix = `${intent.level}-${intent.language}`;
-    const keyCandidates = [
-      ...(intent.canonicalTopic && variant
-        ? [`${intent.canonicalTopic}-${variant}-${suffix}`]
-        : []),
-      ...(intent.canonicalTopic ? [`${intent.canonicalTopic}-${suffix}`] : []),
-      `${intent.topic.toLowerCase().trim()}-${suffix}`,
-    ];
-    // TODO(Track A): cuando prompts.ts exporte PROMPT_VERSION, reemplazar el
-    // `1` hardcodeado para que el paywall siga leyendo el canon vigente.
+    const keyCandidates = skeletonCacheKeyCandidates({
+      topic: intent.topic,
+      canonicalTopic: intent.canonicalTopic,
+      variant,
+      level: intent.level,
+      language: intent.language,
+    });
     const canonRows = await db
       .select({ cacheKey: skeletonCache.cacheKey, skeleton: skeletonCache.skeleton })
       .from(skeletonCache)
       .where(
         and(
           inArray(skeletonCache.cacheKey, keyCandidates),
-          eq(skeletonCache.version, 1),
+          // Misma versión que escribe/lee el pipeline: un bump de
+          // PROMPT_VERSION jamás puede dejar al paywall mostrando canon viejo.
+          eq(skeletonCache.version, PROMPT_VERSION),
         ),
       );
     const canon = keyCandidates

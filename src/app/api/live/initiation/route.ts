@@ -32,11 +32,24 @@ export async function POST(req: Request) {
   const secret = env.ELEVENLABS_WEBHOOK_SECRET;
   if (!secret) {
     // Sin secret configurado el modo seguro está apagado: nadie debería
-    // llamar aquí (los agentes legados usan overrides cliente).
+    // llamar aquí (los agentes legados usan overrides cliente). Si ESTE log
+    // aparece, hay un agente parcheado --secure con la env ausente en este
+    // deploy (rollout a medias): su clase saldrá con el prompt base, sin
+    // brief. Reparar = setear ELEVENLABS_WEBHOOK_SECRET aquí o des-parchear.
+    console.error(
+      "[live] initiation webhook invocado SIN ELEVENLABS_WEBHOOK_SECRET en este entorno: hay un agente migrado a modo seguro antes de tiempo (clase degradada al prompt base).",
+    );
     return new NextResponse("initiation webhook deshabilitado", { status: 503 });
   }
   const header = req.headers.get("x-aulia-webhook-secret") ?? "";
   if (!header || !safeEqual(header, secret)) {
+    // Secret distinto entre el header horneado en el agente y este deploy:
+    // ElevenLabs no recibe iniciación → clase con prompt base, sin brief.
+    // Silencioso para el alumno; ruidoso aquí para repararlo (re-parchear el
+    // agente con el MISMO secret de producción).
+    console.error(
+      "[live] initiation webhook con secret INVÁLIDO: el header del agente no calza con ELEVENLABS_WEBHOOK_SECRET (¿se rotó la env sin re-parchear los agentes?).",
+    );
     return new NextResponse("no autorizado", { status: 401 });
   }
 

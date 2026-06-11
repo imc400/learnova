@@ -53,6 +53,16 @@ const CAP_EXEMPT = new Set([
   "cart_recovery",
 ]);
 
+/** Tipos del ciclo de vida gateados por LIFECYCLE_EMAILS_ENABLED también AL
+ *  ENVIAR (kill-switch real). El gate de los crons solo evita ENCOLAR: sin este
+ *  re-chequeo, lo ya encolado se enviaría igual con el flag apagado — y el
+ *  paso 6 de reconcile.ts re-dispara activamente el outbox atascado cada 5 min. */
+const LIFECYCLE_GATED = new Set<OutboxRow["type"]>([
+  "pro_expiring",
+  "cart_recovery",
+  "reengagement",
+]);
+
 /** $12.345 → "$12.345" (CLP, es-CL). Para no hardcodear montos en copys. */
 function clp(amount: number | undefined): string {
   return typeof amount === "number" ? `$${Math.round(amount).toLocaleString("es-CL")}` : "";
@@ -271,6 +281,16 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
   if (!row) return "no-op (ya procesado o inexistente)";
 
   try {
+    // 1.5) KILL-SWITCH del ciclo de vida EN EL PUNTO DE ENVÍO. Decisión
+    //      consciente: skip() es TERMINAL (status 'skipped') — lo gateado NO
+    //      se enviará al re-encender el flag. Correcto para un kill-switch:
+    //      apagar significa "esto no debe salir", no "esto sale después".
+    //      OJO ops: la env vive en Vercel (app) Y en Trigger.dev (worker,
+    //      vía syncEnvVars solo en cada deploy) — ver docs/runbook-lifecycle-emails.md.
+    if (LIFECYCLE_GATED.has(row.type) && env.LIFECYCLE_EMAILS_ENABLED !== "true") {
+      return skip(outboxId, "lifecycle gate apagado (LIFECYCLE_EMAILS_ENABLED)");
+    }
+
     const resend = getResend();
     if (!resend) return skip(outboxId, "RESEND_API_KEY no configurada");
 

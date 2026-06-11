@@ -152,7 +152,7 @@ export async function markYoutubeQuotaExhausted(): Promise<void> {
     severidad: "critical",
     titulo: "Cuota YouTube AGOTADA (403 de Google)",
     detalle:
-      "Google rechazó una búsqueda por quotaExceeded. Las lecciones en vuelo quedan sin video (encoladas en backfill, sin cachear canon). Resetea a medianoche hora Pacífico.",
+      "Google rechazó una búsqueda por quotaExceeded. Las lecciones en vuelo quedan sin video: su canon se cachea honesto (sin video) y entran al backfill, que las re-ancla y repara el canon. Resetea a medianoche hora Pacífico.",
     contexto: { limiteDiario: env.YOUTUBE_QUOTA_DAILY_LIMIT },
   });
 }

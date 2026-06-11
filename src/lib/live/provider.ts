@@ -252,10 +252,96 @@ function headers() {
   };
 }
 
-/** ¿Está configurado el modo seguro (initiation webhook)? El prompt deja de
- *  viajar al navegador y los overrides cliente quedan deshabilitados. */
+/** ¿Está HABILITADO el modo seguro (initiation webhook) a nivel de entorno?
+ *  Es solo la mitad de la decisión: el aula además verifica POR AGENTE que el
+ *  agente realmente esté parcheado (resolveInitiationMode) — un rollout
+ *  parcial jamás puede dejar un aula muerta o sin brief. */
 export function secureInitiationEnabled(): boolean {
-  return Boolean(env.ELEVENLABS_WEBHOOK_SECRET && env.NEXT_PUBLIC_SITE_URL);
+  if (!env.ELEVENLABS_WEBHOOK_SECRET || !env.NEXT_PUBLIC_SITE_URL) return false;
+  // Guard del escenario "script/agente creado con .env local": un webhook que
+  // apunte a localhost quedaría horneado en el agente de ElevenLabs (que no
+  // puede llamar a localhost) y rompería TODAS sus clases. Con URL local el
+  // modo seguro se considera APAGADO → camino legado completo.
+  if (/localhost|127\.0\.0\.1/i.test(env.NEXT_PUBLIC_SITE_URL)) {
+    console.warn(
+      "[live] modo seguro DESHABILITADO: NEXT_PUBLIC_SITE_URL apunta a localhost — ElevenLabs no podría llamar al initiation webhook. Usa la URL pública de producción.",
+    );
+    return false;
+  }
+  return true;
+}
+
+export type InitiationMode = "secure" | "legacy";
+
+/**
+ * Decide POR AGENTE qué camino usa el aula para inyectar el brief por sesión.
+ *
+ * - "legacy": overrides cliente — el camino completo de siempre (brief +
+ *   saludo con memoria). ÚNICO camino cuando ELEVENLABS_WEBHOOK_SECRET no
+ *   está seteada: sin la env el aula funciona COMPLETA, idéntica a hoy, sin
+ *   llamadas extra a ElevenLabs.
+ * - "secure": cero overrides — ElevenLabs pide el prompt server-to-server a
+ *   /api/live/initiation. SOLO cuando la env existe Y este agente concreto ya
+ *   fue parcheado (overrides cliente apagados en su config real).
+ *
+ * Tabla de degradación (jamás un aula muerta):
+ * · env ausente                  → legacy (completo, sin GET extra).
+ * · env seteada + agente legado  → legacy (clase COMPLETA con brief) + warn:
+ *   esto era el escenario A del rollout parcial — antes el aula dejaba de
+ *   mandar overrides y la clase salía genérica/silenciosamente degradada.
+ * · env seteada + agente seguro  → secure.
+ * · env seteada + GET falla      → secure por precaución: mandar overrides a
+ *   un agente parcheado hace que ElevenLabs RECHACE la conversación (aula
+ *   muerta); no mandarlos a un agente legado solo degrada al prompt base
+ *   (persona completa horneada en el agente, sin brief) — vivo siempre.
+ */
+export async function resolveInitiationMode(agentId: string): Promise<InitiationMode> {
+  if (!secureInitiationEnabled()) return "legacy";
+  try {
+    const res = await fetch(`${EL_BASE}/convai/agents/${encodeURIComponent(agentId)}`, {
+      headers: headers(),
+      // Config fresca SIEMPRE (una vez por carga del aula): durante el rollout
+      // agente-por-agente, una caché vieja mandaría overrides a un agente ya
+      // parcheado → conversación rechazada.
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      throw new Error(`[live] GET agent ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    }
+    const json = (await res.json()) as {
+      platform_settings?: {
+        overrides?: {
+          conversation_config_override?: {
+            agent?: { prompt?: { prompt?: boolean } };
+          };
+          enable_conversation_initiation_client_data_from_webhook?: boolean;
+        };
+      };
+    };
+    const overrides = json.platform_settings?.overrides;
+    const promptOverrideAllowed =
+      overrides?.conversation_config_override?.agent?.prompt?.prompt === true;
+    if (promptOverrideAllowed) {
+      console.warn(
+        `[live] ELEVENLABS_WEBHOOK_SECRET seteada pero el agente ${agentId} sigue en modo LEGADO: el aula manda overrides (clase completa). Migrarlo con: npx tsx --env-file=.env.prod scripts/patch-agent-tools.mts --secure --agent ${agentId}`,
+      );
+      return "legacy";
+    }
+    if (!overrides?.enable_conversation_initiation_client_data_from_webhook) {
+      // Estado raro (overrides off + webhook off): la clase saldrá con el
+      // prompt base del agente. Viva pero sin brief — alertar para repararlo.
+      console.error(
+        `[live] agente ${agentId} con overrides apagados y SIN initiation webhook: clase degradada al prompt base. Re-correr patch-agent-tools.mts --secure --agent ${agentId}`,
+      );
+    }
+    return "secure";
+  } catch (e) {
+    console.error(
+      `[live] no se pudo leer la config del agente ${agentId}; modo seguro por precaución (sin overrides un aula nunca muere):`,
+      e,
+    );
+    return "secure";
+  }
 }
 
 /**

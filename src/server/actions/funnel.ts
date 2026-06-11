@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { and, count, eq } from "drizzle-orm";
@@ -58,8 +59,13 @@ export async function publicWizardQuestionsAction(args: {
   // Anti-abuso (lib de Track E, fail-open): un bot con while(true) facturaba
   // Haiku sin límite. Al excederse NO se rompe el funnel: preguntas de
   // respaldo (texto libre, cero IA) — el humano legítimo sigue avanzando.
-  const rl = await checkRateLimit(`wizard:ip:${await clientIp()}`, {
-    limit: 10,
+  // Clave IP+UA y límite por env (RATE_WIZARD_PER_HOUR, default 60/h): en una
+  // red con NAT (campus universitario = cientos de personas tras UNA IP) la
+  // clave por IP sola degradaba el wizard al 11º uso de la hora. El UA separa
+  // dispositivos distintos detrás del mismo NAT; un bot que rotea UA sigue
+  // acotado por el costo marginal de Haiku y el fail-open no cambia.
+  const rl = await checkRateLimit(`wizard:ip:${await rateLimitClientKey()}`, {
+    limit: env.RATE_WIZARD_PER_HOUR,
     windowSeconds: 3600,
   });
   if (!rl.ok) {
@@ -80,6 +86,20 @@ async function clientIp(): Promise<string> {
     h.get("x-real-ip") ||
     "desconocida"
   );
+}
+
+/**
+ * Clave de rate limit "IP + huella del User-Agent": tras un NAT (campus,
+ * oficina, telco con CG-NAT) cientos de usuarios legítimos comparten UNA IP
+ * pública — la IP sola los mete a todos en el mismo balde. El hash corto del
+ * UA separa dispositivos/navegadores distintos sin guardar el UA crudo
+ * (la tabla rate_limits jamás almacena huellas legibles).
+ */
+async function rateLimitClientKey(): Promise<string> {
+  const h = await headers();
+  const ua = h.get("user-agent") ?? "sin-ua";
+  const uaHash = createHash("sha256").update(ua).digest("hex").slice(0, 12);
+  return `${await clientIp()}:ua:${uaHash}`;
 }
 
 function normalizePhone(raw: string): string | null {
@@ -178,13 +198,18 @@ export async function createAccountAndIntentAction(input: {
     answers: answersParsed.success ? answersParsed.data : [],
   };
 
-  // Anti-abuso de cuentas (3/día por IP, fail-open): un bot fabricaba cuentas
-  // Supabase ilimitadas desde la landing. El mensaje deja la puerta abierta al
-  // caso legítimo (red compartida / ya tiene cuenta → login).
-  const accountLimit = await checkRateLimit(`cuentas:ip:${await clientIp()}`, {
-    limit: 3,
-    windowSeconds: 86_400,
-  });
+  // Anti-abuso de cuentas (RATE_ACCOUNTS_PER_DAY/día, default 30, fail-open):
+  // un bot fabricaba cuentas Supabase ilimitadas desde la landing. Clave
+  // IP+UA y límite por env: el viejo 3/día por IP sola bloqueaba al 4º alumno
+  // legítimo de una red con NAT (campus = una IP para cientos). El mensaje
+  // deja la puerta abierta al caso legítimo (red compartida / login).
+  const accountLimit = await checkRateLimit(
+    `cuentas:ip:${await rateLimitClientKey()}`,
+    {
+      limit: env.RATE_ACCOUNTS_PER_DAY,
+      windowSeconds: 86_400,
+    },
+  );
   if (!accountLimit.ok) {
     return {
       ok: false,

@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   learningPaths,
@@ -22,7 +22,7 @@ import {
 import { PROMPT_VERSION } from "@/lib/ai/prompts";
 import { normalizeTopicSlug } from "@/lib/ai/wizard";
 import { curateVideoForLesson } from "@/lib/youtube/curate";
-import { getVideoDetails } from "@/lib/youtube/client";
+import { getVideoDetails, YouTubeQuotaError } from "@/lib/youtube/client";
 import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
 import type {
   Intake,
@@ -37,8 +37,16 @@ import { env } from "@/lib/env";
 type CachedLessonRow = typeof lessonContentCache.$inferSelect;
 type FreshVideo = Awaited<ReturnType<typeof getVideoDetails>>[number];
 
-/** Lo que una lección terminada aporta a la memoria del curso (A-P0.2). */
-type LessonOutcome = { title: string; label: string; takeaways: string[] };
+/** Lo que una lección terminada aporta a la memoria del curso (A-P0.2).
+ *  terminology viaja en el outcome (no se muta vocab dentro de la lambda
+ *  paralela): el vocab del run se construye DESPUÉS del allSettled, en orden
+ *  de lección — determinístico de verdad. */
+type LessonOutcome = {
+  title: string;
+  label: string;
+  takeaways: string[];
+  terminology: string[];
+};
 type ModuleMemory = { moduleTitle: string; lessons: LessonOutcome[] };
 
 /**
@@ -64,6 +72,37 @@ export function buildSkeletonCacheKey(args: {
   return [topicKey, args.variant?.trim() || null, args.level, args.language]
     .filter(Boolean)
     .join("-");
+}
+
+/**
+ * Candidatas de key para LEER el canon, de la más específica a la legacy:
+ * 1. la key NUEVA (canónica+variant — formato final de Track A),
+ * 2. la canónica sin variant,
+ * 3. la derivación cruda histórica `topic.toLowerCase().trim()-level-language`
+ *    de main — con la que se escribió TODO el canon pre-existente (incluido
+ *    el pre-calentado de la demo: «hacer alfajores-principiante-es»).
+ * Sin el fallback legacy, deployar el formato nuevo dejaba ese canon huérfano
+ * y el pipeline regeneraba en vivo (Opus + ~24 Sonnet + cuota YouTube).
+ * COMPARTIDA por el pipeline (runPathGeneration) y el paywall
+ * (pagar/[intentId]) para que ambos resuelvan SIEMPRE la misma celda.
+ * Los WRITES en cache MISS total usan la primera candidata (formato nuevo);
+ * si un canon viejo existe, se sigue leyendo Y escribiendo bajo SU key para
+ * no fragmentar el canon entre formatos.
+ */
+export function skeletonCacheKeyCandidates(args: {
+  topic: string;
+  canonicalTopic?: string | null;
+  variant?: string | null;
+  level: string;
+  language: string;
+}): string[] {
+  return [
+    ...new Set([
+      buildSkeletonCacheKey(args),
+      buildSkeletonCacheKey({ ...args, variant: null }),
+      `${args.topic.toLowerCase().trim()}-${args.level}-${args.language}`,
+    ]),
+  ];
 }
 
 /* ------------------------- Helpers de coherencia ------------------------- */
@@ -267,7 +306,15 @@ export async function runPathGeneration(pathId: string): Promise<void> {
     const promisedModules = intent?.preview?.modules ?? null;
 
     // --- NIVEL 1 con CACHÉ DE CABEZA GRUESA ---
-    const cacheKey = buildSkeletonCacheKey({
+    // FALLBACK LEGACY (P0): el canon pre-existente (p.ej. el pre-calentado de
+    // la demo) vive bajo la key cruda vieja `topic.toLowerCase().trim()-…`.
+    // Consultar SOLO la key nueva lo dejaba huérfano → regeneración completa
+    // en vivo tras pagar (Opus + ~24 Sonnet + ~2.400 unidades de YouTube).
+    // Se prueban las candidatas (misma precedencia que el paywall) y la ruta
+    // ADOPTA la key del canon encontrado — los lookups y writes de
+    // lesson_content_cache de abajo usan ESTA misma key, así canon viejo y
+    // nuevo jamás se fragmentan. Solo en MISS total se escribe con la nueva.
+    const keyCandidates = skeletonCacheKeyCandidates({
       topic: intake.topic,
       canonicalTopic: intent?.canonicalTopic,
       variant,
@@ -281,11 +328,19 @@ export async function runPathGeneration(pathId: string): Promise<void> {
         .set({ timesReused: sql`${skeletonCache.timesReused} + 1`, updatedAt: new Date() })
         .where(eq(skeletonCache.id, id));
 
-    const [cached] = await db
+    const canonRows = await db
       .select()
       .from(skeletonCache)
-      .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, PROMPT_VERSION)))
-      .limit(1);
+      .where(
+        and(
+          inArray(skeletonCache.cacheKey, keyCandidates),
+          eq(skeletonCache.version, PROMPT_VERSION),
+        ),
+      );
+    const cached = keyCandidates
+      .map((k) => canonRows.find((r) => r.cacheKey === k))
+      .find(Boolean);
+    const cacheKey = cached?.cacheKey ?? keyCandidates[0]!;
 
     let skeleton: PathSkeleton;
     if (cached) {
@@ -440,7 +495,13 @@ export async function runPathGeneration(pathId: string): Promise<void> {
 
     // --- PASO 2: rellenar contenido por módulo EN ORDEN (prioriza los primeros);
     //     lecciones del módulo en paralelo, módulos en serie → el contexto
-    //     acumulado (A-P0.2) es determinístico por esqueleto. ---
+    //     acumulado (A-P0.2) es determinístico por esqueleto: los takeaways
+    //     vienen del contenido (cacheado o fresco) y el vocab de la columna
+    //     terminology del canon, ambos incorporados al CERRAR cada módulo.
+    //     CAVEAT conocido: si una lección FALLA, no aporta takeaways al
+    //     courseMemory de este run y los módulos posteriores pueden cachearse
+    //     con memoria incompleta (determinismo por-historial-de-runs en ese
+    //     borde; fix pendiente: no cachear módulos posteriores al 1er fallo). ---
     let done = 0;
     let firstModuleEmailSent = false;
     // Un mismo video de YouTube no se repite entre lecciones de la ruta.
@@ -567,6 +628,13 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                     anchored: false,
                     anchoredVideoId: null,
                     videoIds: alive,
+                    // Estado TRANSITORIO coherente con el gate: la guía y el
+                    // digest murieron con el ancla — reanchorLesson restaura
+                    // estas columnas al reparar el canon.
+                    hadDigest: false,
+                    coverage: null,
+                    videoCount: alive.length,
+                    quizOk: quizToServe != null,
                     updatedAt: new Date(),
                   })
                   .where(eq(lessonContentCache.id, cachedLesson.id))
@@ -635,7 +703,15 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             ]);
             done++;
             await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
-            return { title: ls.title, label, takeaways: contentToServe.keyTakeaways };
+            return {
+              title: ls.title,
+              label,
+              takeaways: contentToServe.keyTakeaways,
+              // Vocabulario desde el canon (columna terminology): el resume
+              // tras timeout y los compradores B..N reconstruyen el MISMO
+              // vocab que el run fresco (filas legacy sin la columna → []).
+              terminology: cachedLesson.terminology ?? [],
+            };
           }
 
           /* ------------------------- CACHE MISS ------------------------ */
@@ -644,7 +720,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
           // El ranker recibe lección específica + nivel DENTRO del objetivo
           // (A-P1.7; curate.ts es de Track E — este es el canal existente).
           const rankObjective = `${m.objective} · LECCIÓN: ${ls.title} — ${ls.summary} · NIVEL DEL ESTUDIANTE: ${skeleton.level}`;
-          const vids = await curateAndSaveVideo(
+          const curated = await curateAndSaveVideoDetailed(
             lessonId,
             query,
             rankObjective,
@@ -652,6 +728,7 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             skeleton.title,
             usedVideoIds,
           );
+          const vids = curated.vids;
           for (const v of vids) usedVideoIds.add(v.videoId);
           let topVideo = vids[0] ?? null;
           let digest: VideoDigest | null = null;
@@ -755,11 +832,15 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             return null;
           });
 
-          // GATE DE CALIDAD DEL CANON (A-P0.1): contenido degradado NO se
-          // cachea como canónico — se sirve a ESTE usuario y el siguiente
-          // miss lo reintenta completo. Ahorrarse $2 una vez no puede costar
-          // N ventas futuras degradadas.
-          const cacheable = quizData != null && (digest != null || vids.length > 0);
+          // GATE DE CALIDAD DEL CANON (A-P0.1): SOLO un quiz nulo deja la
+          // lección fuera del canon. Si la curación de video falló (cuota
+          // YouTube agotada / API caída), el contenido y el quiz ya son
+          // válidos y costaron lo mismo → se cachean HONESTOS (videoIds: [],
+          // anchored=false) y la lección entra al backfill, que repara el
+          // canon una sola vez para todos. No cachear regalaba el costo
+          // Sonnet completo x N compradores (y el retry de Trigger lo
+          // re-pagaba otra vez).
+          const cacheable = quizData != null;
           if (cacheable) {
             // Orden final: el verificado por coverage primero. Si el gate
             // rechazó todos los candidatos → canon honesto con videoIds: [].
@@ -786,6 +867,9 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                 videoCount: finalVideoIds.length,
                 quizOk: true,
                 anchored: digest != null && topVideo != null,
+                // Vocabulario persistido (A-P0.2): el HIT/resume reconstruye
+                // el vocab del run desde aquí — determinístico por esqueleto.
+                terminology: digest?.terminology.slice(0, 5) ?? [],
               })
               .onConflictDoNothing({
                 target: [
@@ -800,16 +884,33 @@ export async function runPathGeneration(pathId: string): Promise<void> {
               );
           } else {
             console.warn(
-              `[generation] lección ${label} NO entra al canon (quiz=${quizData != null}, digest=${digest != null}, videos=${vids.length}) — el próximo miss la reintenta completa.`,
+              `[generation] lección ${label} NO entra al canon (quiz nulo; digest=${digest != null}, videos=${vids.length}) — el próximo miss la reintenta completa.`,
             );
           }
 
-          // Vocabulario del curso: términos reales del video ancla.
-          if (digest) for (const t of digest.terminology.slice(0, 5)) vocab.add(t);
+          // Curación REVENTADA (cuota/API) y sin videos: la celda quedó
+          // cacheada honesta sin video — el cron backfill-videos la re-ancla
+          // y escribe de vuelta al canon (reanchorLesson). Una búsqueda
+          // legítimamente vacía NO se encola: el gate ya decidió que no hay
+          // video para esto (mismo trato que el coverage rechazado).
+          if (curated.failed && vids.length === 0) {
+            await enqueueVideoBackfill(
+              lessonId,
+              curated.quotaError ? "quota_exceeded" : "curation_failed",
+            );
+          }
 
           done++;
           await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
-          return { title: ls.title, label, takeaways: content.keyTakeaways };
+          // La terminología NO muta `vocab` aquí (carrera intra-módulo: las
+          // hermanas corren en paralelo): viaja en el outcome y se incorpora
+          // tras el allSettled, en orden de lección.
+          return {
+            title: ls.title,
+            label,
+            takeaways: content.keyTakeaways,
+            terminology: digest?.terminology.slice(0, 5) ?? [],
+          };
         }),
       );
 
@@ -830,6 +931,13 @@ export async function runPathGeneration(pathId: string): Promise<void> {
         }
       });
       courseMemory.push({ moduleTitle: m.title, lessons: moduleOutcomes });
+      // Vocabulario del curso (A-P0.2): se incorpora SOLO al cerrar el módulo
+      // y en orden de lección. Mutarlo dentro de la lambda paralela hacía que
+      // el contexto de la 3.2 incluyera (o no) la terminología de la 3.1
+      // según el orden de término — el canon dejaba de ser determinístico.
+      // (Las hermanas no se ven la terminología entre sí, consistente con que
+      // tampoco se ven los takeaways vía courseMemory.)
+      for (const o of moduleOutcomes) for (const t of o.terminology) vocab.add(t);
 
       // El PRIMER módulo con contenido completo → correo "tu ruta está lista,
       // empieza por aquí" (uno solo por ruta; dedupe por moduleId).
@@ -955,16 +1063,26 @@ export async function generateAndSaveQuiz(
   return quiz;
 }
 
+/** Resultado detallado de la curación. `failed` distingue "la curación
+ *  REVENTÓ" (cuota agotada / API caída → transitorio, reparable vía backfill)
+ *  de "la búsqueda fue legítimamente vacía" (no hay video para esto). */
+type CurationResult = {
+  vids: Awaited<ReturnType<typeof curateVideoForLesson>>;
+  failed: boolean;
+  quotaError: boolean;
+};
+
 /** Cura y guarda videos de una lección (idempotente; nunca aborta la ruta).
- *  Devuelve los candidatos curados (rank asc) para el digest/coverage gate. */
-export async function curateAndSaveVideo(
+ *  Devuelve los candidatos curados (rank asc) + diagnóstico del fallo, para
+ *  que el gate del canon distinga cuota agotada de búsqueda vacía (A-P0.1). */
+export async function curateAndSaveVideoDetailed(
   lessonId: string,
   query: string,
   objective: string,
   language: string,
   routeTopic?: string,
   excludeVideoIds?: Set<string>,
-): Promise<Awaited<ReturnType<typeof curateVideoForLesson>>> {
+): Promise<CurationResult> {
   try {
     const vids = await curateVideoForLesson({
       query,
@@ -992,11 +1110,31 @@ export async function curateAndSaveVideo(
         )
         .onConflictDoNothing();
     }
-    return vids;
+    return { vids, failed: false, quotaError: false };
   } catch (err) {
     console.error(`[generation] Curación de video falló (lección ${lessonId}):`, err);
-    return [];
+    return { vids: [], failed: true, quotaError: err instanceof YouTubeQuotaError };
   }
+}
+
+/** Wrapper retro-compatible (extend.ts y los backfills consumen el array). */
+export async function curateAndSaveVideo(
+  lessonId: string,
+  query: string,
+  objective: string,
+  language: string,
+  routeTopic?: string,
+  excludeVideoIds?: Set<string>,
+): Promise<Awaited<ReturnType<typeof curateVideoForLesson>>> {
+  const r = await curateAndSaveVideoDetailed(
+    lessonId,
+    query,
+    objective,
+    language,
+    routeTopic,
+    excludeVideoIds,
+  );
+  return r.vids;
 }
 
 /** Promueve a rank 0 el video que ganó el coverage gate (swap seguro con el
@@ -1026,21 +1164,28 @@ export async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
 
 /**
  * Re-ancla UNA lección ya generada: digest del video (con coverage gate sobre
- * el candidato #2) → regenera el contenido anclado → regenera el quiz grounded.
+ * el candidato #2) → regenera el contenido anclado → regenera el quiz grounded
+ * → ESCRIBE DE VUELTA la celda del canon (lesson_content_cache), si existe.
  * Para backfills de rutas generadas sin digest (p.ej. cuota de Gemini agotada)
  * y para drenar video_backfill_queue (cron de Track E).
+ * Sin el write-back, el link-rot des-anclaba el canon PARA SIEMPRE: cada
+ * comprador futuro recibía la celda degradada (sin guía, quiz despojado) y la
+ * reparación solo arreglaba la copia del usuario que la encoló.
  */
 export async function reanchorLesson(lessonId: string): Promise<string> {
   const [row] = await db
     .select({
       lessonTitle: lessonsT.title,
       stubSummary: lessonsT.stubSummary,
+      lessonIndex: lessonsT.orderIndex,
       moduleTitle: modulesT.title,
       moduleObjective: modulesT.objective,
+      moduleIndex: modulesT.orderIndex,
       pathId: learningPaths.id,
       pathTitle: learningPaths.title,
       level: learningPaths.level,
       language: learningPaths.language,
+      skeletonCacheKey: learningPaths.skeletonCacheKey,
     })
     .from(lessonsT)
     .innerJoin(modulesT, eq(modulesT.id, lessonsT.moduleId))
@@ -1049,13 +1194,50 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     .limit(1);
   if (!row) return "lección no encontrada";
 
-  const vids = await db
-    .select()
-    .from(videoCandidates)
-    .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.isActive, true)))
-    .orderBy(videoCandidates.rank)
-    .limit(2);
-  if (!vids.length) return "sin video";
+  // Celda del canon de esta lección: (skeletonCacheKey de la ruta, índices de
+  // módulo/lección, versión vigente). Aporta el videoQuery original para la
+  // re-curación y es el destino del write-back final.
+  const canonWhere = row.skeletonCacheKey
+    ? and(
+        eq(lessonContentCache.cacheKey, row.skeletonCacheKey),
+        eq(lessonContentCache.moduleIndex, row.moduleIndex),
+        eq(lessonContentCache.lessonIndex, row.lessonIndex),
+        eq(lessonContentCache.version, PROMPT_VERSION),
+      )
+    : null;
+  let canonVideoQuery: string | null = null;
+  if (canonWhere) {
+    const [cell] = await db
+      .select({ videoQuery: lessonContentCache.videoQuery })
+      .from(lessonContentCache)
+      .where(canonWhere)
+      .limit(1);
+    canonVideoQuery = cell?.videoQuery ?? null;
+  }
+
+  const activeCandidates = () =>
+    db
+      .select()
+      .from(videoCandidates)
+      .where(and(eq(videoCandidates.lessonId, lessonId), eq(videoCandidates.isActive, true)))
+      .orderBy(videoCandidates.rank)
+      .limit(2);
+
+  let vids = await activeCandidates();
+  if (!vids.length) {
+    // Sin candidatos vivos (cuota agotada al generar, o todos muertos):
+    // curación FRESCA en vez de devolver "sin video" — la cola existe justo
+    // para reparar estas lecciones cuando la cuota se repone.
+    await curateAndSaveVideo(
+      lessonId,
+      canonVideoQuery ?? row.lessonTitle,
+      row.moduleObjective ?? "",
+      row.language,
+      row.pathTitle,
+    );
+    vids = await activeCandidates();
+    if (!vids.length) return "sin video";
+  }
 
   // stub_summary real (A-P2): antes se usaba el título como summary y el
   // coverage gate + la lección regenerada perdían la descripción original.
@@ -1101,7 +1283,7 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     .set({ content, notes: content.keyTakeaways.join("\n• ") })
     .where(eq(lessonsT.id, lessonId));
 
-  await generateAndSaveQuiz(
+  const quizData = await generateAndSaveQuiz(
     lessonId,
     row.lessonTitle,
     baseSummary,
@@ -1112,7 +1294,41 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     top.durationSeconds ?? null,
     { pathId: row.pathId },
   );
-  return `anclada (coverage ${ins.digest.coverage.toFixed(2)}, video ${top.youtubeVideoId})`;
+
+  // WRITE-BACK AL CANON: el link-rot se repara UNA vez (no por usuario).
+  // Restaura el invariante del gate de calidad: contenido anclado + quiz
+  // grounded + diagnóstico coherente. Si la celda no existe (ruta legacy
+  // jamás cacheada), el UPDATE afecta 0 filas y no pasa nada.
+  let canonNote = "";
+  if (canonWhere) {
+    const videoIds = [
+      top.youtubeVideoId,
+      ...vids.filter((v) => v.youtubeVideoId !== top.youtubeVideoId).map((v) => v.youtubeVideoId),
+    ];
+    const updated = await db
+      .update(lessonContentCache)
+      .set({
+        content,
+        quiz: quizData,
+        videoIds,
+        anchoredVideoId: top.youtubeVideoId,
+        anchored: true,
+        hadDigest: true,
+        coverage: ins.digest.coverage,
+        videoCount: videoIds.length,
+        quizOk: true,
+        terminology: ins.digest.terminology.slice(0, 5),
+        updatedAt: new Date(),
+      })
+      .where(canonWhere)
+      .returning({ id: lessonContentCache.id })
+      .catch((e) => {
+        console.error(`[generation] write-back del canon falló (lección ${lessonId}):`, e);
+        return [] as { id: string }[];
+      });
+    canonNote = updated.length ? ", canon reparado" : "";
+  }
+  return `anclada (coverage ${ins.digest.coverage.toFixed(2)}, video ${top.youtubeVideoId}${canonNote})`;
 }
 
 /**

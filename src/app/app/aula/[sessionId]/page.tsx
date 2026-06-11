@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { liveSessions, learningPaths } from "@/db/schema";
 import { buildSessionInitiation } from "@/lib/live/initiation";
-import { getSessionCredentials, secureInitiationEnabled } from "@/lib/live/provider";
+import { getSessionCredentials, resolveInitiationMode } from "@/lib/live/provider";
 import { AulaClient } from "@/components/app/aula-client";
 
 export async function generateMetadata({
@@ -60,8 +60,15 @@ export default async function AulaPage({
   if (!init) redirect(`/app/rutas/${session.pathId}`);
   if (!init.elevenlabsAgentId) redirect(`/app/rutas/${session.pathId}`);
 
-  const { signedUrl } = await getSessionCredentials(init.elevenlabsAgentId);
-  const secure = secureInitiationEnabled();
+  // El modo es POR AGENTE y con la config real de ElevenLabs como verdad:
+  // sin ELEVENLABS_WEBHOOK_SECRET es SIEMPRE legado (overrides completos,
+  // cero llamadas extra); con la env, solo los agentes ya parcheados pasan al
+  // webhook — un rollout parcial jamás deja la clase genérica ni rechazada.
+  const [{ signedUrl }, mode] = await Promise.all([
+    getSessionCredentials(init.elevenlabsAgentId),
+    resolveInitiationMode(init.elevenlabsAgentId),
+  ]);
+  const secure = mode === "secure";
 
   return (
     <div className="mx-auto max-w-2xl">

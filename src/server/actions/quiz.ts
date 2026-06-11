@@ -312,6 +312,10 @@ export async function gradeQuizAction(
               and(
                 eq(liveSessions.userId, user.id),
                 eq(liveSessions.pathId, ctx.pathId),
+                // Misma regla que el cupo REAL (usedClassMinutes): la
+                // inducción NO consume minutos — sin el filtro, el puente
+                // vendía Pro cuando el servidor aún aceptaba clase gratis.
+                eq(liveSessions.kind, "class"),
               ),
             );
           const usedMin = Math.ceil(Number(used?.sec ?? 0) / 60);

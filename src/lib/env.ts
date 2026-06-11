@@ -84,6 +84,11 @@ const serverSchema = z.object({
   PRICE_CLASS_CLP: z.coerce.number().int().positive().default(6990),
   // Acceso al dashboard admin además de profiles.is_admin (coma-separado).
   ADMIN_EMAILS: z.string().default(""),
+  // Rate limits del funnel público, ajustables SIN deploy (eventos tipo demo
+  // universitaria: cientos de alumnos salen por UNA IP de campus vía NAT —
+  // los defaults viejos 3/día y 10/h bloqueaban al 4º registro / 11º wizard).
+  RATE_ACCOUNTS_PER_DAY: z.coerce.number().int().positive().default(30),
+  RATE_WIZARD_PER_HOUR: z.coerce.number().int().positive().default(60),
 
   // --- Correos de ciclo de vida (renovación Pro D-3/D0 + carros T+1h/T+24h) ---
   // Los crons SIEMPRE corren, pero con "false" NO encolan nada (log claro en

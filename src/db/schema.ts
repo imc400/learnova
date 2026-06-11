@@ -247,6 +247,12 @@ export const lessonContentCache = pgTable(
     coverage: real("coverage"), // score del coverage gate del video ancla
     videoCount: integer("video_count"), // candidatos verificados al cachear
     quizOk: boolean("quiz_ok"), // ¿el quiz se generó y validó?
+    // Terminología que el video ancla introdujo (digest.terminology, top 5).
+    // El vocab del contexto acumulado (A-P0.2) se reconstruye DESDE AQUÍ en
+    // cache-hit/resume: sin esta columna, las lecciones canónicas generadas
+    // tras un resume salían con vocabulario vacío (dependía del historial de
+    // runs, no del esqueleto).
+    terminology: jsonb("terminology").$type<string[]>(),
     // false = lección canónica SIN video verificado (gate rechazó o cuota):
     // honesto en BD para que el HIT no "promueva" un video jamás verificado.
     anchored: boolean("anchored").default(true).notNull(),
@@ -301,6 +307,14 @@ export const learningPaths = pgTable(
     generationProgress: integer("generation_progress").default(0).notNull(),
     generationStep: text("generation_step"),
     generationStartedAt: timestamp("generation_started_at", { withTimezone: true }),
+    // Strikes de reconciliación (paso 4 de src/lib/ops/reconcile.ts): cuántas
+    // veces el cron re-encoló esta generación colgada. runPathGeneration
+    // resetea generation_started_at en CADA run, así que un umbral por minutos
+    // jamás se cruza si el re-run sí arranca y vuelve a morir; este contador
+    // NO se resetea entre runs → >=2 strikes = failed real (sin loop de
+    // re-enqueues quemando tokens y cuota de YouTube). La reconciliación lo
+    // vuelve a 0 al marcar failed para que el "Reintentar" manual parta limpio.
+    generationRequeues: integer("generation_requeues").default(0).notNull(),
     totalLessons: integer("total_lessons"),
     intake: jsonb("intake"), // respuestas del cuestionario inicial
     skeletonCacheKey: text("skeleton_cache_key"), // de qué esqueleto derivó

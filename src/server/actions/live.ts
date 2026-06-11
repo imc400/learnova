@@ -190,6 +190,11 @@ export async function startClassAction(
 
   // Agente de voz lazy (una vez por persona). Si ElevenLabs falla, el usuario
   // recibe un banner claro — jamás una página de error cruda.
+  // El modo del agente se fija AL NACER según el entorno (con
+  // ELEVENLABS_WEBHOOK_SECRET válida nace en modo seguro; sin ella, legado
+  // con overrides). El aula NO asume nada de esto: resuelve el modo POR
+  // AGENTE leyendo su config real (resolveInitiationMode), así que flotas
+  // mixtas durante el rollout funcionan sin aulas muertas ni clases genéricas.
   if (!agent.elevenlabsAgentId) {
     let elId: string;
     try {

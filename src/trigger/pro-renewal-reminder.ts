@@ -32,7 +32,12 @@ import { enqueueProgressEmail } from "@/lib/email/enqueue";
 
   GATING (decisión fundador): con LIFECYCLE_EMAILS_ENABLED != "true" el cron
   corre y loguea cuántos encolaría, pero NO encola nada — el fundador aprueba
-  los copys y enciende sin deploy.
+  los copys y recién ahí enciende el flag. OJO: este cron corre EN el worker
+  de Trigger.dev y syncEnvVars (trigger.config.ts) solo sube las envs EN CADA
+  DEPLOY — encender/apagar sin deploy requiere cambiar la variable en el
+  dashboard de Trigger.dev (y en Vercel para la app). Además process.ts
+  re-chequea el flag AL ENVIAR (kill-switch real: apaga también lo ya
+  encolado). Checklist completo: docs/runbook-lifecycle-emails.md.
 */
 
 const RENEWAL_WINDOW_DAYS = 3;
@@ -130,7 +135,7 @@ export const proRenewalReminderTask = schedules.task({
       const d3 = renewals.filter((r) => r.touch === "d3").length;
       const d0 = renewals.length - d3;
       console.log(
-        `[lifecycle] LIFECYCLE_EMAILS_ENABLED=false — encolaría ${renewals.length} pro_expiring (D-3: ${d3}, D0: ${d0}) y ${reengage.length} reengagement. Nada se encoló; el fundador enciende la env tras aprobar los copys.`,
+        `[lifecycle] LIFECYCLE_EMAILS_ENABLED=false — encolaría ${renewals.length} pro_expiring (D-3: ${d3}, D0: ${d0}) y ${reengage.length} reengagement. Nada se encoló; para encender sin deploy la env se cambia en el dashboard de Trigger.dev (y en Vercel) — ver docs/runbook-lifecycle-emails.md.`,
       );
       return { gated: true, proExpiring: renewals.length, reengagement: reengage.length };
     }
@@ -140,7 +145,9 @@ export const proRenewalReminderTask = schedules.task({
     for (const r of renewals) {
       const periodStart = new Date(r.periodEnd.getTime() - 30 * 86_400_000);
       // Minutos del pool Pro consumidos en el período pagado (misma aritmética
-      // que el servidor de clases: duración real + in_progress acotado a 30').
+      // que el servidor de clases: duración real + in_progress acotado a 30',
+      // y SOLO kind='class' — la inducción va fuera del cupo, igual que en
+      // usedClassMinutes de actions/live; sin el filtro el correo subestimaba).
       const [used] = await db
         .select({
           sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
@@ -150,6 +157,7 @@ export const proRenewalReminderTask = schedules.task({
         .where(
           and(
             eq(liveSessions.userId, r.userId),
+            eq(liveSessions.kind, "class"),
             gte(liveSessions.createdAt, periodStart),
           ),
         );
