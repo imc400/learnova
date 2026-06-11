@@ -6,6 +6,8 @@ import {
   emailPreferences,
   emailLog,
   profiles,
+  routeIntents,
+  subscriptions,
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { getResend, emailFrom } from "./client";
@@ -35,10 +37,38 @@ const TYPE_ALLOW_FIELD: Record<string, keyof typeof emailPreferences.$inferSelec
   // class_summary / class_reminder: efectivamente transaccionales (el usuario
   // tomó/agendó la clase explícitamente) — sin campo de opt-out granular,
   // solo respetan unsubscribedAll. No se listan aquí a propósito.
+  // pro_expiring / cart_recovery: cuasi-transaccionales (renovación de SU plan,
+  // compra que ÉL inició) — solo unsubscribedAll, igual que las de clase.
 };
 
-/** Tipos exentos del frequency cap: hitos mayores y transaccionales de clase. */
-const CAP_EXEMPT = new Set(["path_completed", "class_summary", "class_reminder"]);
+/** Tipos exentos del frequency cap: hitos mayores y transaccionales de clase.
+ *  pro_expiring (la promesa "te avisamos" no puede caer por el cap) y
+ *  cart_recovery (2 toques máx por intent, compra iniciada por el usuario)
+ *  también pasan — su cadencia la limita el dedupeKey, no el cap. */
+const CAP_EXEMPT = new Set([
+  "path_completed",
+  "class_summary",
+  "class_reminder",
+  "pro_expiring",
+  "cart_recovery",
+]);
+
+/** $12.345 → "$12.345" (CLP, es-CL). Para no hardcodear montos en copys. */
+function clp(amount: number | undefined): string {
+  return typeof amount === "number" ? `$${Math.round(amount).toLocaleString("es-CL")}` : "";
+}
+
+/** "14 de junio" — fecha corta es-CL para asuntos e intros (TZ Chile). */
+function fechaCorta(iso: string | undefined): string {
+  if (!iso) return "pronto";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "pronto";
+  return d.toLocaleDateString("es-CL", {
+    day: "numeric",
+    month: "long",
+    timeZone: "America/Santiago",
+  });
+}
 
 async function skip(outboxId: string, reason: string): Promise<string> {
   await db
@@ -81,26 +111,27 @@ function validateAiContent(
 function deterministicContent(
   type: OutboxRow["type"],
   p: ProgressEmailPayload,
+  firstName?: string | null,
 ): EmailContent | null {
   switch (type) {
     case "module_ready":
       return {
         subject: `Ya puedes empezar: ${p.moduleTitle}`,
-        intro: `El módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}" quedó listo. Tu siguiente paso te espera.`,
+        intro: `El módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle ?? "tu ruta"}" quedó listo. Tu siguiente paso te espera.`,
         bullets: (p.lessonTitles ?? []).slice(0, 5),
         cta: "Abrir el módulo",
       };
     case "module_learned":
       return {
         subject: `🏁 Completaste "${p.moduleTitle}"`,
-        intro: `Cerraste el módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle}". Esto fue lo que viste:`,
+        intro: `Cerraste el módulo "${p.moduleTitle}" de tu ruta "${p.pathTitle ?? "tu ruta"}". Esto fue lo que viste:`,
         bullets: (p.lessonTitles ?? []).slice(0, 5),
         cta: "Seguir con mi ruta",
       };
     case "path_completed":
       return {
-        subject: `🏆 Completaste tu ruta: ${p.pathTitle}`,
-        intro: `Terminaste todas las lecciones de "${p.pathTitle}". Esto es constancia de verdad — felicitaciones.`,
+        subject: `🏆 Completaste tu ruta: ${p.pathTitle ?? "tu ruta"}`,
+        intro: `Terminaste todas las lecciones de "${p.pathTitle ?? "tu ruta"}". Esto es constancia de verdad — felicitaciones.`,
         bullets: (p.lessonTitles ?? []).slice(0, 5),
         cta: "Ver mi ruta completa",
       };
@@ -108,23 +139,83 @@ function deterministicContent(
       // moduleTitle = nombre del profesor; lessonTitles = resumen + tareas.
       return {
         subject: `Tu clase con ${p.moduleTitle ?? "tu profesor"}: resumen y tareas`,
-        intro: `¡Buena clase! Esto fue lo que trabajaron en "${p.pathTitle}" y lo que tu profesor te dejó para seguir avanzando:`,
+        intro: `¡Buena clase! Esto fue lo que trabajaron en "${p.pathTitle ?? "tu ruta"}" y lo que tu profesor te dejó para seguir avanzando:`,
         bullets: (p.lessonTitles ?? []).slice(0, 8),
         cta: "Continuar mi ruta",
       };
     case "class_reminder":
       return {
-        subject: `Recordatorio: tu clase de "${p.pathTitle}" se acerca`,
+        subject: `Recordatorio: tu clase de "${p.pathTitle ?? "tu ruta"}" se acerca`,
         intro: `Tu profesor te espera. Entra unos minutos antes y ten a mano tus dudas del módulo.`,
         bullets: (p.lessonTitles ?? []).slice(0, 4),
         cta: "Ir a mi ruta",
       };
+    // --- Ciclo de vida de ingresos (encolados por crons GATEADOS por
+    //     LIFECYCLE_EMAILS_ENABLED; deterministas, sin IA = cero riesgo) ---
+    case "pro_expiring": {
+      const fecha = fechaCorta(p.proPeriodEnd);
+      const bullets: string[] = [];
+      if (typeof p.proMinutesLeft === "number" && p.proMinutesLeft > 0) {
+        bullets.push(
+          `Te quedan ${p.proMinutesLeft} minutos de clases en vivo de tu período — son tuyos, úsalos`,
+        );
+      }
+      if (typeof p.proRoutesLeft === "number" && p.proRoutesLeft > 0) {
+        bullets.push(
+          `Te ${p.proRoutesLeft === 1 ? "queda 1 ruta nueva" : `quedan ${p.proRoutesLeft} rutas nuevas`} de tu cupo del mes`,
+        );
+      }
+      // Verificado en confirm-pro.ts: la renovación anticipada extiende desde
+      // period_end — la promesa "los días se suman" es literalmente el código.
+      bullets.push(`Si renuevas antes del ${fecha}, los días se suman — no pierdes nada`);
+      if (p.touch === "d0") {
+        return {
+          subject: `Hoy termina tu Aulia Pro — sin cobro automático, como prometimos`,
+          intro: `Hoy ${fecha} vence tu período Pro. Nadie te cobra solo: si quieres seguir con tus profesores y tus rutas mensuales, renuevas tú — y tus 30 días nuevos parten desde tu vencimiento.`,
+          bullets,
+          cta: `Renovar 30 días más${p.amountClp ? ` · ${clp(p.amountClp)}` : ""}`,
+        };
+      }
+      return {
+        subject: `Tu Aulia Pro termina el ${fecha} — tú decides`,
+        intro: `Prometimos avisarte en vez de cobrarte — aquí está el aviso. Tu Pro sigue activo hasta el ${fecha}, y lo que queda de tu período es tuyo:`,
+        bullets,
+        cta: `Renovar 30 días más${p.amountClp ? ` · ${clp(p.amountClp)}` : ""}`,
+      };
+    }
+    case "cart_recovery": {
+      const tema = p.topic ?? "lo que quieres aprender";
+      const nombre = firstName ? `${firstName}, tu` : "Tu";
+      const bullets = (p.previewModules ?? []).slice(0, 6);
+      if (p.touch === "24h") {
+        return {
+          subject: `Tu ruta de ${tema} sigue reservada — con garantía de 7 días`,
+          intro: `${p.previewHook ? `${p.previewHook} ` : ""}Tu temario quedó diseñado y sigue reservado. Y la decisión no tiene letra chica: si en 7 días no es para ti, te devolvemos el 100%. Si vas en serio, con Aulia Pro esta ruta queda incluida, más clases en vivo todos los meses.`,
+          bullets,
+          cta: `Activar mi ruta${p.amountClp ? ` · ${clp(p.amountClp)}` : ""}`,
+        };
+      }
+      return {
+        subject: `${nombre} ruta de ${tema} quedó diseñada y esperándote`,
+        intro: `${p.previewHook ? `${p.previewHook} ` : ""}Tu temario está listo y reservado — nadie más lo ve. Esto es lo que te espera:`,
+        bullets,
+        cta: `Ver mi temario y activarlo${p.amountClp ? ` · ${clp(p.amountClp)}` : ""}`,
+      };
+    }
+    case "reengagement": {
+      if (!p.nextStep) return null; // sin sugerencia congelada no hay correo honesto
+      return {
+        subject: `Tu siguiente ruta sigue esperándote${firstName ? `, ${firstName}` : ""}`,
+        intro: `Completaste "${p.pathTitle ?? "tu ruta"}" — eso no es común, la mayoría no llega ni a la mitad. Tu siguiente paso ya está diseñado en borrador: ${p.nextStep.topic}. Construye sobre lo que ya dominas.`,
+        bullets: (p.nextStep.reasons ?? []).slice(0, 3),
+        cta: `Ver mi siguiente paso`,
+      };
+    }
     // TODO: el correo de bienvenida aún no existe (2 de 3 de la trilogía);
     // cuando se escriba su plantilla, este case deja de devolver null.
     case "welcome":
     case "streak_at_risk":
     case "weekly_recap":
-    case "reengagement":
       return null;
     default:
       return null;
@@ -138,6 +229,9 @@ const BADGES: Partial<Record<OutboxRow["type"], string>> = {
   path_completed: "Ruta completada ✺",
   class_summary: "Tu clase en vivo",
   class_reminder: "Clase agendada",
+  pro_expiring: "Tu Aulia Pro",
+  cart_recovery: "Tu ruta te espera",
+  reengagement: "Tu siguiente paso",
 };
 
 /** Preview del inbox: corta en el último espacio antes del límite, con «…». */
@@ -224,11 +318,47 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
       return skip(outboxId, `frequency cap (${prefs.maxPerWeek}/semana)`);
     }
 
+    // 3.5) Re-chequeo anti-stale del ciclo de vida: entre el enqueue del cron
+    //      y el envío pudo pasar lo único que importa (pagó / renovó). Un
+    //      correo de recuperación a alguien que YA compró destruye confianza.
+    const payload = (row.payload ?? {}) as ProgressEmailPayload;
+    if (row.type === "cart_recovery") {
+      if (!payload.intentId) return skip(outboxId, "cart_recovery sin intentId");
+      const [intent] = await db
+        .select({ status: routeIntents.status, pathId: routeIntents.pathId })
+        .from(routeIntents)
+        .where(eq(routeIntents.id, payload.intentId))
+        .limit(1);
+      if (!intent || intent.status !== "pending_payment" || intent.pathId) {
+        return skip(outboxId, "carro ya resuelto (pagado/convertido/inexistente)");
+      }
+    }
+    if (row.type === "pro_expiring") {
+      const [sub] = await db
+        .select({
+          plan: subscriptions.plan,
+          status: subscriptions.status,
+          currentPeriodEnd: subscriptions.currentPeriodEnd,
+        })
+        .from(subscriptions)
+        .where(eq(subscriptions.userId, row.userId))
+        .limit(1);
+      const enqueuedEnd = payload.proPeriodEnd ? new Date(payload.proPeriodEnd).getTime() : 0;
+      const currentEnd = sub?.currentPeriodEnd?.getTime() ?? 0;
+      if (!sub || sub.plan !== "pro" || sub.status !== "active") {
+        return skip(outboxId, "ya no es Pro activo");
+      }
+      // period_end avanzó respecto del encolado → renovó: el aviso sobra.
+      if (enqueuedEnd && currentEnd > enqueuedEnd + 60_000) {
+        return skip(outboxId, "ya renovó (period_end avanzó)");
+      }
+    }
+
     // 4) Contenido: IA con grounding para hitos de aprendizaje; determinista
     //    para anuncios. SIEMPRE con fallback determinista. Tipos sin plantilla
     //    → skip explícito (jamás el fallback genérico).
-    const payload = (row.payload ?? {}) as ProgressEmailPayload;
-    const deterministic = deterministicContent(row.type, payload);
+    const firstName = user.fullName?.split(" ")[0]?.trim() || null;
+    const deterministic = deterministicContent(row.type, payload, firstName);
     if (!deterministic) {
       console.warn(`[email] tipo "${row.type}" sin plantilla — skip (outbox ${outboxId})`);
       return skip(outboxId, `tipo "${row.type}" sin plantilla determinista`);
@@ -241,7 +371,8 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
       try {
         const ai = await generateProgressEmail({
           kind: row.type === "path_completed" ? "path_completed" : "module_learned",
-          pathTitle: payload.pathTitle,
+          // Los hitos de aprendizaje siempre la traen; el fallback es defensivo.
+          pathTitle: payload.pathTitle ?? "tu ruta",
           moduleTitle: payload.moduleTitle,
           lessonTitles: payload.lessonTitles ?? [],
           quizzesPassed: payload.quizzesPassed ?? 0,
@@ -259,13 +390,45 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
     // 5) Render + envío.
     const site = env.NEXT_PUBLIC_SITE_URL;
     const unsubscribeUrl = `${site}/api/email/unsubscribe?token=${prefs.unsubToken}`;
-    const ctaUrl = payload.pathId ? `${site}/app/rutas/${payload.pathId}` : `${site}/app`;
+    // Destino del CTA según el tipo: los de ciclo de vida no llevan a la ruta.
+    const ctaUrl =
+      row.type === "pro_expiring"
+        ? `${site}/app/perfil`
+        : row.type === "cart_recovery"
+          ? `${site}/app/pagar/${payload.intentId}`
+          : row.type === "reengagement" && payload.nextStep
+            ? `${site}${payload.nextStep.url}`
+            : payload.pathId
+              ? `${site}/app/rutas/${payload.pathId}`
+              : `${site}/app`;
     const stats: { label: string; value: string }[] = [];
-    if (typeof payload.progressPct === "number" && payload.progressPct > 0) {
-      stats.push({ label: "Avance", value: `${payload.progressPct}%` });
+    // En los correos de venta (renovación/carro) los chips de avance son ruido.
+    const isLifecycle = row.type === "pro_expiring" || row.type === "cart_recovery";
+    if (!isLifecycle) {
+      if (typeof payload.progressPct === "number" && payload.progressPct > 0) {
+        stats.push({ label: "Avance", value: `${payload.progressPct}%` });
+      }
+      if (user.totalXp > 0) stats.push({ label: "XP", value: String(user.totalXp) });
+      if (user.currentStreak > 1) stats.push({ label: "Racha", value: `${user.currentStreak} días` });
     }
-    if (user.totalXp > 0) stats.push({ label: "XP", value: String(user.totalXp) });
-    if (user.currentStreak > 1) stats.push({ label: "Racha", value: `${user.currentStreak} días` });
+
+    // path_completed con sugerencia: la CTA primaria VENDE la continuación
+    // (el único correo del sistema que vende algo no puede venderlo en
+    // segundo plano); "ver mi ruta" pasa a secundaria. Las reasons congeladas
+    // ("Porque dominaste X") se suman como bullets — grounding ya validado.
+    const hasNextStep = row.type === "path_completed" && !!payload.nextStep;
+    const primaryCta = hasNextStep
+      ? {
+          label: `Crear mi siguiente ruta: ${payload.nextStep!.topic}`,
+          url: `${site}${payload.nextStep!.url}`,
+        }
+      : { label: content.cta, url: ctaUrl };
+    const secondaryCta = hasNextStep
+      ? { label: "Ver mi ruta completa", url: ctaUrl }
+      : undefined;
+    const bullets = hasNextStep
+      ? [...content.bullets, ...(payload.nextStep!.reasons ?? []).slice(0, 2)].slice(0, 7)
+      : content.bullets;
 
     const html = await render(
       ProgressEmail({
@@ -274,21 +437,23 @@ export async function processOutboxEmail(outboxId: string): Promise<string> {
         // El asunto puede traer emoji (inbox); el heading del cuerpo no.
         heading: content.subject.replace(/^[\p{Extended_Pictographic}\u{FE0F}\u{200D}\s]+/u, ""),
         intro: content.intro,
-        bullets: content.bullets,
+        bullets,
         bulletsTitle:
           row.type === "module_ready"
             ? "Lo que viene"
             : row.type === "class_summary"
               ? "Resumen y tareas"
-              : "Esto aprendiste",
-        cta: { label: content.cta, url: ctaUrl },
-        secondaryCta:
-          row.type === "path_completed" && payload.nextStep
-            ? {
-                label: `Tu siguiente paso: ${payload.nextStep.topic}`,
-                url: `${site}${payload.nextStep.url}`,
-              }
-            : undefined,
+              : row.type === "cart_recovery"
+                ? "Tu temario, reservado"
+                : row.type === "pro_expiring"
+                  ? "Lo que queda de tu período"
+                  : row.type === "reengagement"
+                    ? "Por qué este paso"
+                    : "Esto aprendiste",
+        // El candado del carro = el mismo gesto del paywall (temario bloqueado).
+        bulletIcon: row.type === "cart_recovery" ? "🔒" : row.type === "pro_expiring" ? "→" : "✓",
+        cta: primaryCta,
+        secondaryCta,
         stats,
         unsubscribeUrl,
       }),

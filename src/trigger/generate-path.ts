@@ -20,6 +20,24 @@ export const generatePathTask = task({
       pathId: payload.pathId,
       error,
     });
+    // Estado real ANTES de tocar nada: distingue "murió sin estructura" de
+    // "ready pero incompleta" (allSettled dejó lecciones fallidas — A-P0.1).
+    let status: string | null = null;
+    let progress: number | null = null;
+    try {
+      const [p] = await db
+        .select({
+          status: learningPaths.status,
+          generationProgress: learningPaths.generationProgress,
+        })
+        .from(learningPaths)
+        .where(eq(learningPaths.id, payload.pathId))
+        .limit(1);
+      status = p?.status ?? null;
+      progress = p?.generationProgress ?? null;
+    } catch (e) {
+      console.error("[trigger] no se pudo leer el estado de la ruta:", e);
+    }
     // La ruta NUNCA queda 'generating' eterna: si los 3 intentos murieron antes
     // de publicar la estructura, se marca failed (la UI ofrece reintentar).
     // Si ya está 'ready', se respeta: lo generado sirve y un retry manual rellena.
@@ -38,11 +56,20 @@ export const generatePathTask = task({
     }
     // Dinero ya cobrado + generación muerta = incidente: el fundador se
     // entera por correo, no por el reclamo del cliente.
+    const readyIncomplete = status === "ready" && (progress ?? 0) < 100;
     await alertFounder({
-      titulo: "Generación de ruta MURIÓ tras 3 intentos",
-      detalle:
-        "La generación falló definitivamente. La ruta quedó en 'failed' (la UI ofrece reintentar), pero si fue una compra hay un cliente esperando — revisar el run en Trigger.dev y reintentar.",
-      contexto: { pathId: payload.pathId, error: String(error).slice(0, 300) },
+      titulo: readyIncomplete
+        ? "Ruta publicada INCOMPLETA tras 3 intentos"
+        : "Generación de ruta MURIÓ tras 3 intentos",
+      detalle: readyIncomplete
+        ? "La estructura está 'ready' y el cliente la ve, pero quedaron lecciones SIN contenido (progress < 100) tras agotar los reintentos. Re-disparar generate-path regenera SOLO las faltantes (idempotente por lección) — revisar el run en Trigger.dev."
+        : "La generación falló definitivamente. La ruta quedó en 'failed' (la UI ofrece reintentar), pero si fue una compra hay un cliente esperando — revisar el run en Trigger.dev y reintentar.",
+      contexto: {
+        pathId: payload.pathId,
+        status,
+        progress,
+        error: String(error).slice(0, 300),
+      },
     });
   },
   run: async (payload: { pathId: string }) => {

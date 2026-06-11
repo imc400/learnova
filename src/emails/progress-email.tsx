@@ -90,6 +90,9 @@ export interface ProgressEmailProps {
   intro: string;
   bullets: string[];
   bulletsTitle?: string;
+  /** Marca de cada bullet: "✓" (logro, default) o "🔒" (temario reservado del
+   *  carro abandonado — idéntico al candado del paywall, consistencia total). */
+  bulletIcon?: string;
   cta: { label: string; url: string };
   secondaryCta?: { label: string; url: string };
   stats?: { label: string; value: string }[];
@@ -103,6 +106,7 @@ export function ProgressEmail({
   intro,
   bullets,
   bulletsTitle = "Esto aprendiste",
+  bulletIcon = "✓",
   cta,
   secondaryCta,
   stats,
@@ -164,7 +168,7 @@ export function ProgressEmail({
                 </Text>
                 {bullets.map((b, i) => (
                   <Text key={i} style={{ color: palette.ink, fontSize: 14, lineHeight: "21px", margin: "0 0 6px" }}>
-                    <span style={{ color: palette.green, fontWeight: 800 }}>✓</span>{" "}
+                    <span style={{ color: palette.green, fontWeight: 800 }}>{bulletIcon}</span>{" "}
                     {b}
                   </Text>
                 ))}

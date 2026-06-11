@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { and, count, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { learningPaths, profiles, routeIntents, xpEvents } from "@/db/schema";
@@ -8,12 +9,19 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { intakeSchema } from "@/lib/ai/schemas";
 import {
-  generateWizardQuestions,
+  getWizardQuestions,
   fallbackQuestions,
-  generateRoutePreview,
-  type WizardQuestion,
+  fallbackTopicCheck,
+  findTopicCheckForIntent,
+  resolveCanonicalTopic,
+  sanitizeVariant,
+  wizardAnswersSchema,
+  GOAL_ARCHETYPES,
+  type GoalArchetype,
+  type WizardQuestionsResult,
 } from "@/lib/ai/wizard";
 import { createPathRecord } from "@/lib/paths/create";
+import { checkRateLimit } from "@/lib/ratelimit";
 import {
   getEntitlement,
   proRoutesLeftThisMonth,
@@ -28,21 +36,50 @@ import { env } from "@/lib/env";
   Si paga: ruta. Si no: tenemos tema + correo + WhatsApp = carro abandonado.
 */
 
-/** Preguntas del wizard SIN auth (landing de ads). */
+/** Preguntas del wizard SIN auth (landing de ads). Con caché en BD: temas
+ *  calientes responden instantáneo y sin tocar Haiku. */
 export async function publicWizardQuestionsAction(args: {
   topic: string;
   level: string;
   language: string;
-}): Promise<{ questions: WizardQuestion[]; adaptive: boolean }> {
+}): Promise<WizardQuestionsResult> {
   const topic = String(args.topic ?? "").trim().slice(0, 120);
   const level = ["principiante", "intermedio", "avanzado"].includes(args.level)
     ? args.level
     : "principiante";
   const language = ["es", "en", "pt"].includes(args.language) ? args.language : "es";
   if (topic.length < 2) {
-    return { questions: fallbackQuestions(topic || "este tema"), adaptive: false };
+    return {
+      questions: fallbackQuestions(topic || "este tema"),
+      topicCheck: fallbackTopicCheck(topic || "tema"),
+      adaptive: false,
+    };
   }
-  return generateWizardQuestions({ topic, level, language });
+  // Anti-abuso (lib de Track E, fail-open): un bot con while(true) facturaba
+  // Haiku sin límite. Al excederse NO se rompe el funnel: preguntas de
+  // respaldo (texto libre, cero IA) — el humano legítimo sigue avanzando.
+  const rl = await checkRateLimit(`wizard:ip:${await clientIp()}`, {
+    limit: 10,
+    windowSeconds: 3600,
+  });
+  if (!rl.ok) {
+    return {
+      questions: fallbackQuestions(topic),
+      topicCheck: fallbackTopicCheck(topic),
+      adaptive: false,
+    };
+  }
+  return getWizardQuestions({ topic, level, language });
+}
+
+/** IP del cliente (Vercel: x-forwarded-for). Solo para rate limiting. */
+async function clientIp(): Promise<string> {
+  const h = await headers();
+  return (
+    h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    h.get("x-real-ip") ||
+    "desconocida"
+  );
 }
 
 function normalizePhone(raw: string): string | null {
@@ -68,13 +105,21 @@ export async function createAccountAndIntentAction(input: {
   email: string;
   password: string;
   phone: string;
+  /** Plan elegido en la landing: viaja hasta el paywall (Pro destacado). */
+  plan?: "pro";
   topic: string;
   goal: string;
-  metaDisplay: string;
   level: string;
   language: string;
   priorExperience?: string;
   weeklyHours?: number;
+  /** Arquetipo de la meta elegida (catálogo cerrado; se valida igual). */
+  goalArchetype?: string | null;
+  /** Slug del medio/equipo elegido (celular, excel…); se sanea a slug. */
+  variant?: string | null;
+  /** Respuestas estructuradas del wizard (se validan con zod; si no calzan,
+   *  se persisten vacías — la analítica nunca bloquea una venta). */
+  wizardAnswers?: unknown;
 }): Promise<FunnelResult> {
   // --- Validaciones (errores legibles, el cliente los muestra inline) ---
   const name = String(input.name ?? "").trim().slice(0, 80);
@@ -102,6 +147,52 @@ export async function createAccountAndIntentAction(input: {
     return { ok: false, error: "Algo del formulario quedó incompleto. Revisa el tema y tu meta." };
   }
   const intake = parsed.data;
+
+  // --- Gate de viabilidad del tema, ANTES de crear la cuenta ---
+  // Re-derivado en servidor desde wizard_questions_cache (el cliente no manda
+  // el veredicto: sería bypasseable desde DevTools). Hoy sin esto se puede
+  // pagar por una ruta que Opus va a rehusar → failed con dinero cobrado.
+  const topicCheck = await findTopicCheckForIntent({
+    topic: intake.topic,
+    level: intake.level,
+    language: intake.language,
+  });
+  if (topicCheck && ["inseguro", "inviable"].includes(topicCheck.verdict)) {
+    return {
+      ok: false,
+      error:
+        topicCheck.note ??
+        "Ese tema no lo podemos convertir en una ruta. Prueba reformularlo con otras palabras.",
+    };
+  }
+  const canonicalTopic = resolveCanonicalTopic(topicCheck, intake.topic);
+  const goalArchetype: GoalArchetype | null = GOAL_ARCHETYPES.includes(
+    input.goalArchetype as GoalArchetype,
+  )
+    ? (input.goalArchetype as GoalArchetype)
+    : null;
+  const variant = sanitizeVariant(input.variant);
+  const answersParsed = wizardAnswersSchema.safeParse(input.wizardAnswers ?? []);
+  const wizardAnswers = {
+    variant,
+    answers: answersParsed.success ? answersParsed.data : [],
+  };
+
+  // Anti-abuso de cuentas (3/día por IP, fail-open): un bot fabricaba cuentas
+  // Supabase ilimitadas desde la landing. El mensaje deja la puerta abierta al
+  // caso legítimo (red compartida / ya tiene cuenta → login).
+  const accountLimit = await checkRateLimit(`cuentas:ip:${await clientIp()}`, {
+    limit: 3,
+    windowSeconds: 86_400,
+  });
+  if (!accountLimit.ok) {
+    return {
+      ok: false,
+      emailTaken: true,
+      error:
+        "Hemos recibido varias cuentas desde tu conexión hoy. Si ya tienes una, inicia sesión; si no, inténtalo más tarde.",
+    };
+  }
 
   // --- Cuenta auto-confirmada (cero fricción entre el comprador y el pago) ---
   const admin = createAdminClient();
@@ -154,7 +245,10 @@ export async function createAccountAndIntentAction(input: {
     })
     .where(eq(profiles.id, user.id));
 
-  // --- Intent + preview (el FOMO honesto del paywall) ---
+  // --- Intent (el preview del paywall NO se genera aquí: pagar/page.tsx lo
+  // hace perezoso e idempotente leyendo primero el canon de skeleton_cache.
+  // Generarlo acá sumaba +1-2 s de Haiku al clic más frágil del embudo, y
+  // corría incluso con paywall apagado). ---
   const [me] = await db
     .select({ isAdmin: profiles.isAdmin })
     .from(profiles)
@@ -163,13 +257,6 @@ export async function createAccountAndIntentAction(input: {
   const { isPro } = await getEntitlement(user.id);
   const proHasQuota = isPro && (await proRoutesLeftThisMonth(user.id)) > 0;
   const paywallOn = env.PAYWALL_ENABLED === "true" && !proHasQuota && !me?.isAdmin;
-
-  const preview = await generateRoutePreview({
-    topic: intake.topic,
-    level: intake.level,
-    goal: intake.goal,
-    language: intake.language,
-  });
 
   const [intent] = await db
     .insert(routeIntents)
@@ -184,18 +271,17 @@ export async function createAccountAndIntentAction(input: {
       phone,
       status: paywallOn ? "pending_payment" : "bypassed",
       amountClp: paywallOn ? env.PRICE_ROUTE_CLP : null,
-      preview: preview
-        ? {
-            modules: preview.modules,
-            hook: preview.hook,
-            metaDisplay: String(input.metaDisplay ?? "").slice(0, 160),
-          }
-        : null,
+      // Contrato del caché (Opción A): el topic canónico es la base del
+      // cacheKey (Track A lo lee); el arquetipo y las respuestas discretas
+      // alimentan overlay/analítica sin tocar la key.
+      canonicalTopic,
+      goalArchetype,
+      wizardAnswers,
     })
     .returning({ id: routeIntents.id });
   if (!intent) return { ok: false, error: "No pudimos guardar tu ruta. Intenta de nuevo." };
 
-  if (paywallOn) redirect(`/app/pagar/${intent.id}`);
+  if (paywallOn) redirect(`/app/pagar/${intent.id}${input.plan === "pro" ? "?plan=pro" : ""}`);
 
   // Paywall apagado → flujo free de siempre (techo de costos intacto).
   if (!isPro) {

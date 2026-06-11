@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { ArrowRight, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Check, Spark } from "@/components/marketing/landing/icons";
 import {
   getOrCreateNextPathSuggestion,
   nextPathUrl,
 } from "@/lib/next-path";
+import { createNextPathIntentAction } from "@/server/actions/next-path";
+import { SubmitButton } from "@/components/app/submit-button";
 
 /*
   "Siguiente paso": aparece SOLO con la ruta al 100% (el pico motivacional).
   Una sugerencia protagonista generada desde lo aprendido — la siguiente ruta
   no existe en ningún catálogo: se crea a medida si el estudiante la acepta.
+  El CTA es UN clic (POST → intent + preview → paywall): del trofeo al temario
+  bloqueado sin re-pasar por el wizard; "ajustar" queda como salida menor.
 */
 
 export async function NextStepCard({
@@ -63,13 +66,19 @@ export async function NextStepCard({
         </div>
       )}
 
-      <Button asChild size="sm" className="mt-5">
-        <Link href={nextPathUrl(suggestion, pathId)}>
+      <form action={createNextPathIntentAction.bind(null, pathId, "card")} className="mt-5">
+        <SubmitButton size="sm" pendingText="Preparando tu temario…">
           Crear mi siguiente ruta <ArrowRight className="size-4" />
-        </Link>
-      </Button>
+        </SubmitButton>
+      </form>
       <p className="mt-2 text-[11px] text-muted-foreground">
-        Se genera a tu medida, construyendo sobre lo que ya dominas.
+        Se genera a tu medida, construyendo sobre lo que ya dominas.{" "}
+        <Link
+          href={nextPathUrl(suggestion, pathId, "card")}
+          className="font-medium text-foreground underline"
+        >
+          Ajustar antes de crear
+        </Link>
       </p>
     </div>
   );

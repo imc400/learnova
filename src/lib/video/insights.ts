@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { videoInsights } from "@/db/schema";
+import { videoInsights, quotaUsage } from "@/db/schema";
 import { env } from "@/lib/env";
 
 /*
@@ -41,9 +41,19 @@ export const videoDigestSchema = z.object({
       questionIdea: z.coerce.string().catch(""),
     }),
   ),
+  // Default 0.5 y NO 0.7: un coverage inventado de 0.7 APROBABA el gate
+  // (umbral 0.5/0.35) con un dato que Gemini nunca afirmó. 0.5 deja pasar el
+  // digest (no descarta digests válidos como haría 0) pero gatilla la
+  // verificación del candidato alternativo. El catch LOGUEA cuando se activa.
   coverage: z.coerce
     .number()
-    .catch(0.7)
+    .catch((ctx) => {
+      console.warn(
+        "[video] digest sin coverage válido — default conservador 0.5:",
+        ctx.error.issues[0]?.message,
+      );
+      return 0.5;
+    })
     .describe("0-1: cuánto del objetivo de la lección cubre el video"),
   coverageNotes: z.coerce.string().catch(""),
   apparentLevel: z.coerce.string().catch(""),
@@ -93,6 +103,23 @@ function postValidate(
   return cleaned;
 }
 
+/** Cuenta cada request a Gemini en quota_usage.gemini_requests (E-P2 — la
+ *  columna la creó la fundación). Jamás lanza ni bloquea el digest. */
+async function countGeminiRequest(): Promise<void> {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    await db
+      .insert(quotaUsage)
+      .values({ day: today, geminiRequests: 1 })
+      .onConflictDoUpdate({
+        target: quotaUsage.day,
+        set: { geminiRequests: sql`${quotaUsage.geminiRequests} + 1` },
+      });
+  } catch (e) {
+    console.warn("[video] quota_usage.gemini_requests no registrado:", e);
+  }
+}
+
 async function fetchGeminiDigest(
   videoId: string,
   lessonSummary: string,
@@ -100,6 +127,7 @@ async function fetchGeminiDigest(
   durationSeconds: number | null,
 ): Promise<VideoDigest | null> {
   if (!env.GEMINI_API_KEY) return null;
+  await countGeminiRequest();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
   try {
@@ -126,7 +154,13 @@ async function fetchGeminiDigest(
       },
     );
     if (!res.ok) {
-      console.warn(`[video] Gemini HTTP ${res.status} (video ${videoId})`);
+      // 429 = cuota/rate limit de Gemini (transitorio, el caller reintenta una
+      // vez y la lección sale sin anclaje); otros códigos = request/video malo.
+      if (res.status === 429) {
+        console.warn(`[video] Gemini SIN CUOTA (429) — video ${videoId}: la lección saldrá sin digest.`);
+      } else {
+        console.warn(`[video] Gemini HTTP ${res.status} (video ${videoId})`);
+      }
       return null;
     }
     const json = (await res.json()) as {

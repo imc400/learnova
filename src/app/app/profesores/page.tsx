@@ -11,9 +11,8 @@ import {
   progress,
   modules,
   lessons,
-  subscriptions,
 } from "@/db/schema";
-import { getEntitlement } from "@/lib/subscription";
+import { getEntitlement, proPeriodWindow } from "@/lib/subscription";
 import { startClassAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
 import { PageHeader } from "@/components/app/brand/page-header";
@@ -73,17 +72,26 @@ export default async function ProfesoresPage() {
     : [];
   const agentByKey = new Map(agents.map((a) => [a.cacheKey, a]));
 
-  // Minutos usados por ruta (todas las sesiones cuentan al pool de la ruta).
+  // Minutos usados por ruta — MISMA matemática que usedClassMinutes en el
+  // servidor (kind='class': la inducción va fuera del cupo; in_progress
+  // cuenta por tiempo transcurrido): la UI muestra el saldo que se aplica.
   const pathIds = ready.map((p) => p.id);
+  const usedMinutesExpr = sql<number>`ceil((
+    coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)
+    + coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), 1800)) filter (where ${liveSessions.status} = 'in_progress'), 0)
+  ) / 60.0)::int`;
   const usage = pathIds.length
     ? await db
         .select({
           pathId: liveSessions.pathId,
-          min: sql<number>`ceil(coalesce(sum(${liveSessions.durationSec}), 0) / 60.0)::int`,
+          min: usedMinutesExpr,
         })
         .from(liveSessions)
         .where(
-          inArray(liveSessions.pathId, pathIds),
+          and(
+            inArray(liveSessions.pathId, pathIds),
+            eq(liveSessions.kind, "class"),
+          ),
         )
         .groupBy(liveSessions.pathId)
     : [];
@@ -119,33 +127,23 @@ export default async function ProfesoresPage() {
 
   const { isPro } = await getEntitlement(user.id);
 
-  // Ventana del pool mensual Pro: el PERÍODO pagado, no el mes calendario.
-  // No existe columna current_period_start, así que se deriva del período
-  // manual de 30 días (end − 30d). Si hubo renovación anticipada (los días
-  // se suman y el inicio derivado caería en el futuro), se usa una ventana
-  // móvil de 30 días — solo lectura, no toca pagos.
-  let periodEnd: Date | null = null;
-  if (isPro) {
-    const [sub] = await db
-      .select({ end: subscriptions.currentPeriodEnd })
-      .from(subscriptions)
-      .where(eq(subscriptions.userId, user.id))
-      .limit(1);
-    periodEnd = sub?.end ?? null;
-  }
-  const THIRTY_D = 30 * 86_400_000;
-  const fallbackStart = new Date(Date.now() - THIRTY_D);
-  const derived = periodEnd ? new Date(periodEnd.getTime() - THIRTY_D) : fallbackStart;
-  const periodStart = derived.getTime() > Date.now() ? fallbackStart : derived;
+  // Ventana del pool Pro: UNA sola fuente de verdad (proPeriodWindow) — la
+  // misma que aplica startClassAction. La UI jamás muestra un saldo distinto
+  // al que el servidor descuenta.
+  const { start: periodStart, end: periodEnd } = isPro
+    ? await proPeriodWindow(user.id)
+    : { start: new Date(0), end: null };
 
   const [monthRow] = isPro
     ? await db
-        .select({
-          min: sql<number>`ceil(coalesce(sum(${liveSessions.durationSec}), 0) / 60.0)::int`,
-        })
+        .select({ min: usedMinutesExpr })
         .from(liveSessions)
         .where(
-          sql`${liveSessions.userId} = ${user.id} and ${liveSessions.createdAt} >= ${periodStart}`,
+          and(
+            eq(liveSessions.userId, user.id),
+            eq(liveSessions.kind, "class"),
+            sql`${liveSessions.createdAt} >= ${periodStart}`,
+          ),
         )
     : [];
   const proMonthLeft = isPro

@@ -19,10 +19,20 @@ import { env } from "@/lib/env";
 export const metadata = { title: "Planes" };
 export const dynamic = "force-dynamic";
 
+/** Atribución de la compra Pro: superficies que llegan a /app/planes con
+ *  ?source= (catálogo cerrado; lo re-valida subscribeProAction). */
+const PLANES_SOURCES = new Set([
+  "planes_clases",
+  "dashboard_banner",
+  "profesores_upsell",
+  "post_clase",
+  "quiz_trabado",
+]);
+
 export default async function PlanesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; motivo?: string }>;
+  searchParams: Promise<{ error?: string; motivo?: string; source?: string }>;
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
@@ -38,6 +48,13 @@ export default async function PlanesPage({
   // PAT activo → suscripción real con cobro automático. Sin PAT → Pro MANUAL:
   // cobro único de 30 días, sin renovación automática (se avisa para renovar).
   const proAutomatico = env.PRO_SUBSCRIPTION_ENABLED === "true";
+  // ¿Desde qué superficie llegó? (rebote por cupo, upsell post-clase, banner…)
+  const source =
+    sp.source && PLANES_SOURCES.has(sp.source)
+      ? sp.source
+      : sp.motivo === "limite-rutas"
+        ? "planes_limite"
+        : null;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -158,7 +175,7 @@ export default async function PlanesPage({
               </li>
             ))}
           </ul>
-          <form action={subscribeProAction.bind(null, null)} className="mt-6">
+          <form action={subscribeProAction.bind(null, null, source)} className="mt-6">
             <SubmitButton size="lg" className="w-full" pendingText="Conectando con Flow…">
               <Sparkles className="size-4" /> Hacerme Pro
             </SubmitButton>

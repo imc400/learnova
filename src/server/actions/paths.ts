@@ -9,28 +9,32 @@ import { env } from "@/lib/env";
 import { createPathRecord } from "@/lib/paths/create";
 import { intakeSchema } from "@/lib/ai/schemas";
 import {
-  generateWizardQuestions,
+  getWizardQuestions,
   fallbackQuestions,
-  generateRoutePreview,
-  type WizardQuestion,
+  fallbackTopicCheck,
+  findTopicCheckForIntent,
+  resolveCanonicalTopic,
+  sanitizeVariant,
+  wizardAnswersSchema,
+  GOAL_ARCHETYPES,
+  type GoalArchetype,
+  type WizardQuestionsResult,
 } from "@/lib/ai/wizard";
-import { enqueuePathGeneration } from "@/lib/generation/run";
 import {
   getEntitlement,
   proRoutesLeftThisMonth,
   FREE_PATH_LIMIT,
 } from "@/lib/subscription";
-import { slugify } from "@/lib/utils";
-
 /**
- * Paso 1 → 2 del intake adaptativo: preguntas a medida del tema (Haiku).
+ * Paso 1 → 2 del intake adaptativo: preguntas a medida del tema (Haiku, con
+ * caché en BD — comparte filas con el funnel público).
  * Nunca falla hacia el usuario: si la IA no responde, hay set de respaldo.
  */
 export async function wizardQuestionsAction(args: {
   topic: string;
   level: string;
   language: string;
-}): Promise<{ questions: WizardQuestion[]; adaptive: boolean }> {
+}): Promise<WizardQuestionsResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -43,9 +47,13 @@ export async function wizardQuestionsAction(args: {
     : "principiante";
   const language = ["es", "en", "pt"].includes(args.language) ? args.language : "es";
   if (topic.length < 2) {
-    return { questions: fallbackQuestions(topic || "este tema"), adaptive: false };
+    return {
+      questions: fallbackQuestions(topic || "este tema"),
+      topicCheck: fallbackTopicCheck(topic || "tema"),
+      adaptive: false,
+    };
   }
-  return generateWizardQuestions({ topic, level, language });
+  return getWizardQuestions({ topic, level, language });
 }
 
 /** Crea una ruta desde el cuestionario de intake y dispara su generación. */
@@ -136,6 +144,12 @@ export async function createRouteIntentAction(input: {
   weeklyHours?: number;
   phone: string;
   from?: string;
+  /** Arquetipo de la meta elegida (catálogo cerrado; se valida igual). */
+  goalArchetype?: string | null;
+  /** Slug del medio/equipo elegido (celular, excel…); se sanea a slug. */
+  variant?: string | null;
+  /** Respuestas estructuradas del wizard (zod-validadas; jamás bloquean). */
+  wizardAnswers?: unknown;
 }) {
   const supabase = await createClient();
   const {
@@ -156,6 +170,32 @@ export async function createRouteIntentAction(input: {
 
   const phone = normalizePhone(String(input.phone ?? ""));
   if (!phone) redirect("/app/crear?error=telefono");
+
+  // Gate de viabilidad re-derivado en SERVIDOR (la UI ya bloquea inseguro/
+  // inviable en el paso 1→2; esto cubre llamadas directas a la action).
+  // Sin él se puede pagar por una ruta que Opus va a rehusar → failed cobrado.
+  const topicCheck = await findTopicCheckForIntent({
+    topic: intake.topic,
+    level: intake.level,
+    language: intake.language,
+  });
+  if (topicCheck && ["inseguro", "inviable"].includes(topicCheck.verdict)) {
+    throw new Error(
+      topicCheck.note ?? "Ese tema no se puede convertir en una ruta de aprendizaje.",
+    );
+  }
+  const canonicalTopic = resolveCanonicalTopic(topicCheck, intake.topic);
+  const goalArchetype: GoalArchetype | null = GOAL_ARCHETYPES.includes(
+    input.goalArchetype as GoalArchetype,
+  )
+    ? (input.goalArchetype as GoalArchetype)
+    : null;
+  const variant = sanitizeVariant(input.variant);
+  const answersParsed = wizardAnswersSchema.safeParse(input.wizardAnswers ?? []);
+  const wizardAnswers = {
+    variant,
+    answers: answersParsed.success ? answersParsed.data : [],
+  };
 
   // Métrica "Siguiente paso": validar propiedad del origen.
   let sourcePathId: string | null = null;
@@ -199,31 +239,19 @@ export async function createRouteIntentAction(input: {
       status: paywallOn ? "pending_payment" : "bypassed",
       amountClp: paywallOn ? env.PRICE_ROUTE_CLP : null,
       sourcePathId,
+      // Contrato del caché (Opción A): topic canónico → base del cacheKey
+      // (Track A); arquetipo + respuestas discretas → overlay/analítica.
+      canonicalTopic,
+      goalArchetype,
+      wizardAnswers,
     })
     .returning({ id: routeIntents.id });
   if (!intent) throw new Error("No se pudo guardar tu solicitud.");
 
   if (paywallOn) {
-    // Preview real para el paywall (Haiku ~1 s; si falla, el paywall degrada).
-    const preview = await generateRoutePreview({
-      topic: intake.topic,
-      level: intake.level,
-      goal: intake.goal,
-      language: intake.language,
-    });
-    if (preview) {
-      await db
-        .update(routeIntents)
-        .set({
-          preview: {
-            modules: preview.modules,
-            hook: preview.hook,
-            metaDisplay: intake.goal.split(".")[0]?.slice(0, 160) ?? "",
-          },
-          updatedAt: new Date(),
-        })
-        .where(eq(routeIntents.id, intent.id));
-    }
+    // El preview lo genera el paywall (pagar/page.tsx) de forma perezosa e
+    // idempotente, leyendo PRIMERO el canon de skeleton_cache. Generarlo aquí
+    // duplicaba la llamada Haiku y sumaba 1-2 s al submit del wizard.
     redirect(`/app/pagar/${intent.id}`);
   }
 

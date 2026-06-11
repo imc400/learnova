@@ -5,6 +5,10 @@ import {
   GraduationCap,
   ShoppingCart,
   Banknote,
+  Siren,
+  Activity,
+  Youtube,
+  RefreshCcw,
 } from "lucide-react";
 import { requireAdmin } from "@/lib/admin";
 import { formatPrice } from "@/lib/utils";
@@ -15,7 +19,20 @@ import {
   getAdminUsers,
   getAbandonedCarts,
   getAdminPaths,
+  getOpenIncidents,
+  getAiCostSummary,
+  getQuotaSummary,
+  getProblemPaths,
+  getPaidIntentsWithoutPath,
+  getContinuationKpis,
+  getProBySource,
 } from "@/server/queries/admin";
+import {
+  adminReplayPathAction,
+  adminRunReconcileFormAction,
+  resolveIncidentAction,
+} from "@/server/actions/ops";
+import { SubmitButton } from "@/components/app/submit-button";
 
 // El template del root layout ya agrega "· Aulia".
 export const metadata = { title: "Admin" };
@@ -51,6 +68,18 @@ export default async function AdminPage() {
     getAbandonedCarts(),
     getAdminPaths(),
   ]);
+  // Salud operativa por separado: si las tablas de ops aún no existen
+  // (migración pendiente), el resto de la sala de control sigue funcionando.
+  const [incidents, aiCost, quota, problemPaths, paidSinRuta, continuation, proSources] =
+    await Promise.all([
+      getOpenIncidents().catch(() => []),
+      getAiCostSummary().catch(() => null),
+      getQuotaSummary().catch(() => null),
+      getProblemPaths().catch(() => []),
+      getPaidIntentsWithoutPath().catch(() => []),
+      getContinuationKpis().catch(() => null),
+      getProBySource().catch(() => []),
+    ]);
 
   const kpiCards = [
     { icon: Users, label: "Usuarios", value: kpis.usersTotal, sub: `+${kpis.users7d} esta semana` },
@@ -76,6 +105,50 @@ export default async function AdminPage() {
         Todo lo que pasa en Aulia, en números accionables. Se actualiza en cada carga.
       </p>
 
+      {/* Incidentes abiertos (alertFounder los registra; banner rojo) */}
+      {incidents.length > 0 && (
+        <section className="mt-6 rounded-xl border border-destructive/40 bg-destructive/5 p-5">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold text-destructive">
+            <Siren className="size-4" /> Incidentes abiertos ({incidents.length})
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {incidents.map((inc) => (
+              <li
+                key={inc.id}
+                className="flex items-start justify-between gap-3 rounded-lg border border-destructive/20 bg-card p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    <span
+                      className={`mr-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                        inc.severity === "critical"
+                          ? "bg-destructive/10 text-destructive"
+                          : "bg-accent/30 text-accent-foreground"
+                      }`}
+                    >
+                      {inc.severity}
+                    </span>
+                    {inc.title}
+                  </p>
+                  {inc.detail && (
+                    <p className="mt-1 whitespace-pre-line text-xs text-muted-foreground">
+                      {inc.detail}
+                    </p>
+                  )}
+                  <p className="mt-1 text-[10px] text-muted-foreground">{fmtDate(inc.createdAt)}</p>
+                </div>
+                <form action={resolveIncidentAction}>
+                  <input type="hidden" name="incidentId" value={inc.id} />
+                  <SubmitButton variant="outline" size="sm" pendingText="…">
+                    Resolver
+                  </SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* KPIs */}
       <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-3">
         {kpiCards.map((k) => (
@@ -88,6 +161,181 @@ export default async function AdminPage() {
           </div>
         ))}
       </div>
+
+      {/* Salud operativa: cuota YouTube + costo IA + reconciliación a demanda */}
+      <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-soft">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+            <Activity className="size-4 text-primary" /> Salud operativa
+          </h2>
+          <form action={adminRunReconcileFormAction}>
+            <SubmitButton variant="outline" size="sm" pendingText="Reconciliando…">
+              <RefreshCcw className="size-3.5" /> Correr reconciliación ahora
+            </SubmitButton>
+          </form>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-border p-4">
+            <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              <Youtube className="size-3.5" /> Cuota YouTube hoy
+            </p>
+            {quota ? (
+              <>
+                <p className="mt-1.5 font-display text-xl font-bold tabular-nums">
+                  {quota.youtubeUnits.toLocaleString("es-CL")}
+                  <span className="text-sm font-normal text-muted-foreground">
+                    {" "}/ {quota.youtubeDailyLimit.toLocaleString("es-CL")} u.
+                  </span>
+                </p>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full rounded-full ${
+                      quota.youtubeUnits >= quota.youtubeSoftLimit
+                        ? "bg-destructive"
+                        : quota.youtubeUnits >= quota.youtubeDailyLimit * 0.8
+                          ? "bg-accent"
+                          : "bg-primary"
+                    }`}
+                    style={{
+                      width: `${Math.min(100, (quota.youtubeUnits / quota.youtubeDailyLimit) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  breaker en {quota.youtubeSoftLimit.toLocaleString("es-CL")} ·{" "}
+                  {quota.backfillPending} lecciones en backfill · Gemini{" "}
+                  {quota.geminiRequests} req · resetea 00:00 PT
+                </p>
+              </>
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground">sin datos (¿migración pendiente?)</p>
+            )}
+          </div>
+          <div className="rounded-lg border border-border p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Costo IA hoy (Anthropic)
+            </p>
+            {aiCost ? (
+              <>
+                <p className="mt-1.5 font-display text-xl font-bold tabular-nums">
+                  US$ {aiCost.costTodayUsd.toFixed(2)}
+                </p>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {aiCost.callsToday} llamadas · cache-hit {aiCost.cacheHitPct}% — si se
+                  dispara, kill-switch env <code>AI_DISABLED=true</code>
+                </p>
+              </>
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                sin datos aún (lo puebla el wrapper de Track A)
+              </p>
+            )}
+          </div>
+          <div className="rounded-lg border border-border p-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Costo por ruta (14 días)
+            </p>
+            {aiCost ? (
+              <>
+                <p className="mt-1.5 font-display text-xl font-bold tabular-nums">
+                  p50 US$ {aiCost.costPerPathP50Usd.toFixed(2)}
+                </p>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  p95 US$ {aiCost.costPerPathP95Usd.toFixed(2)} — fresca vs cacheada, ya
+                  no es fe
+                </p>
+              </>
+            ) : (
+              <p className="mt-1.5 text-sm text-muted-foreground">sin datos aún</p>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Pagados sin ruta: el incidente que NO puede esperar */}
+      {paidSinRuta.length > 0 && (
+        <section className="mt-6 rounded-xl border border-destructive/40 bg-destructive/5 p-5">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold text-destructive">
+            <Banknote className="size-4" /> Pagados SIN ruta ({paidSinRuta.length})
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Plata cobrada sin producto. La reconciliación los repara cada 5 min — si uno
+            persiste aquí, usar el botón de arriba y revisar Trigger.dev.
+          </p>
+          <table className="mt-3 w-full text-sm">
+            <tbody>
+              {paidSinRuta.map((i) => (
+                <tr key={i.id} className="border-b border-border/50">
+                  <td className="py-2 pr-3 font-medium capitalize">{i.topic}</td>
+                  <td className="py-2 pr-3 text-xs">{i.email ?? "—"}</td>
+                  <td className="py-2 pr-3 text-xs tabular-nums">
+                    {i.amountClp ? formatPrice(i.amountClp, "CLP") : "—"}
+                  </td>
+                  <td className="py-2 text-xs text-muted-foreground">
+                    {i.paidAt ? fmtDate(i.paidAt) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      {/* Generaciones con problemas + replay por fila (E-P1.3) */}
+      {problemPaths.length > 0 && (
+        <section className="mt-6 rounded-xl border border-accent bg-accent/10 p-5">
+          <h2 className="font-display text-base font-semibold">
+            Generaciones con problemas ({problemPaths.length})
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            failed, colgadas, draft viejas o ready incompletas (14 días). Replay re-encola:
+            la generación es idempotente y resume desde el caché.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="py-2 pr-3">Ruta</th>
+                  <th className="py-2 pr-3">Usuario</th>
+                  <th className="py-2 pr-3">Problema</th>
+                  <th className="py-2 pr-3 text-right">Generación</th>
+                  <th className="py-2 pr-3">Cuándo</th>
+                  <th className="py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {problemPaths.map((p) => (
+                  <tr key={p.id} className="border-b border-border/50">
+                    <td className="max-w-56 truncate py-2 pr-3 font-medium">{p.title}</td>
+                    <td className="py-2 pr-3 text-xs text-muted-foreground">{p.email}</td>
+                    <td className="py-2 pr-3">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          p.problema === "falló"
+                            ? "bg-destructive/10 text-destructive"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {p.problema}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{p.generationProgress}%</td>
+                    <td className="py-2 pr-3 text-xs text-muted-foreground">{fmtDate(p.createdAt)}</td>
+                    <td className="py-2 text-right">
+                      <form action={adminReplayPathAction}>
+                        <input type="hidden" name="pathId" value={p.id} />
+                        <SubmitButton variant="outline" size="sm" pendingText="Encolando…">
+                          Replay
+                        </SubmitButton>
+                      </form>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Embudo */}
       <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-soft">
@@ -118,6 +366,77 @@ export default async function AdminPage() {
               </div>
             );
           })}
+        </div>
+      </section>
+
+      {/* Atribución: funnel de continuación + Pro por source (columnas Track D) */}
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
+        <h2 className="font-display text-base font-semibold">Atribución de ingresos</h2>
+        <div className="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Siguiente paso (continuación)
+            </p>
+            {continuation ? (
+              <>
+                <p className="mt-1.5 text-sm">
+                  <span className="font-display text-xl font-bold tabular-nums">
+                    {continuation.sugerenciasEmitidas}
+                  </span>{" "}
+                  <span className="text-muted-foreground">sugerencias emitidas</span>
+                </p>
+                {continuation.porVia.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Aún sin intents de continuación.
+                  </p>
+                ) : (
+                  <table className="mt-2 w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="py-1.5 pr-3">Vía</th>
+                        <th className="py-1.5 pr-3 text-right">Intents</th>
+                        <th className="py-1.5 text-right">Pagados</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {continuation.porVia.map((v) => (
+                        <tr key={v.via} className="border-b border-border/50">
+                          <td className="py-1.5 pr-3 capitalize">{v.via}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{v.intents}</td>
+                          <td className="py-1.5 text-right tabular-nums font-semibold">
+                            {v.pagados}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-muted-foreground">sin datos (¿migración pendiente?)</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Pro por CTA de origen
+            </p>
+            {proSources.length === 0 ? (
+              <p className="mt-2 text-sm text-muted-foreground">
+                Aún sin compras Pro con atribución (la columna la puebla cada CTA).
+              </p>
+            ) : (
+              <table className="mt-2 w-full text-sm">
+                <tbody>
+                  {proSources.map((s) => (
+                    <tr key={s.source} className="border-b border-border/50">
+                      <td className="py-1.5 pr-3">{s.source}</td>
+                      <td className="py-1.5 text-right tabular-nums font-semibold">{s.compras}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       </section>
 

@@ -1,7 +1,8 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   learningPaths,
+  routeIntents,
   skeletonCache,
   lessonContentCache,
   modules as modulesT,
@@ -9,13 +10,17 @@ import {
   quizzes as quizzesT,
   questions as questionsT,
   videoCandidates,
+  videoBackfillQueue,
 } from "@/db/schema";
 import {
   generatePathSkeleton,
   generateLessonContent,
   generateQuiz,
   generateVideoQueries,
+  generateRouteOverlay,
 } from "@/lib/ai/generate";
+import { PROMPT_VERSION } from "@/lib/ai/prompts";
+import { normalizeTopicSlug } from "@/lib/ai/wizard";
 import { curateVideoForLesson } from "@/lib/youtube/curate";
 import { getVideoDetails } from "@/lib/youtube/client";
 import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
@@ -29,14 +34,190 @@ import type {
 type GeneratedQuizData = GeneratedQuiz;
 import { env } from "@/lib/env";
 
+type CachedLessonRow = typeof lessonContentCache.$inferSelect;
+type FreshVideo = Awaited<ReturnType<typeof getVideoDetails>>[number];
+
+/** Lo que una lección terminada aporta a la memoria del curso (A-P0.2). */
+type LessonOutcome = { title: string; label: string; takeaways: string[] };
+type ModuleMemory = { moduleTitle: string; lessons: LessonOutcome[] };
+
+/**
+ * Key canónica del caché de cabeza gruesa (A-P1.4):
+ * `{canonicalTopic|slug(topic)}-{variant?}-{level}-{language}`.
+ * - canonicalTopic: slug del wizard (Track B) — sin typos/acentos/stopwords.
+ * - variant (equipo: celular vs cámara, Excel vs Sheets): SÍ faceta la key —
+ *   es la única dimensión donde fragmentar es correcto (cambia qué contenido
+ *   es verdadero). La meta JAMÁS faceta (Opción A: overlay por ruta).
+ * EXPORTADA para que el paywall (Track B) y next-path (Track D) consulten
+ * EXACTAMENTE la misma key que escribe este pipeline.
+ */
+export function buildSkeletonCacheKey(args: {
+  topic: string;
+  canonicalTopic?: string | null;
+  variant?: string | null;
+  level: string;
+  language: string;
+}): string {
+  const topicKey = args.canonicalTopic?.trim()
+    ? args.canonicalTopic.trim()
+    : normalizeTopicSlug(args.topic);
+  return [topicKey, args.variant?.trim() || null, args.level, args.language]
+    .filter(Boolean)
+    .join("-");
+}
+
+/* ------------------------- Helpers de coherencia ------------------------- */
+
+/** ¿El nivel aparente del video contradice el del estudiante? (A-P1.7 — el
+ *  dato apparentLevel venía muerto en BD). Solo contradicciones claras:
+ *  principiante↔avanzado; intermedio nunca penaliza. */
+export function levelsContradict(
+  apparentLevel: string | null | undefined,
+  studentLevel: string,
+): boolean {
+  if (!apparentLevel) return false;
+  const a = apparentLevel.toLowerCase();
+  const norm =
+    a.includes("princip") || a.includes("beginner") || a.includes("básic") || a.includes("basic") || a.includes("intro")
+      ? "principiante"
+      : a.includes("avanz") || a.includes("advanced") || a.includes("expert")
+        ? "avanzado"
+        : null;
+  if (!norm) return false;
+  return (
+    (norm === "principiante" && studentLevel === "avanzado") ||
+    (norm === "avanzado" && studentLevel === "principiante")
+  );
+}
+
+/** Coverage EFECTIVO para el gate: penaliza −0.2 el calce de nivel roto. */
+export function effectiveCoverage(
+  digest: VideoDigest,
+  studentLevel: string,
+): number {
+  return (
+    digest.coverage - (levelsContradict(digest.apparentLevel, studentLevel) ? 0.2 : 0)
+  );
+}
+
+/** Quita del quiz cacheado toda pregunta anclada al video (para servir un
+ *  canon cuyo video ancla murió — el quiz no puede evaluar lo que el nuevo
+ *  video no dice). Devuelve null si no sobrevive ninguna pregunta. */
+function stripVideoGroundedQuestions(
+  quiz: GeneratedQuizData | null,
+): GeneratedQuizData | null {
+  if (!quiz?.questions?.length) return null;
+  const kept = quiz.questions
+    .filter((q) => q.grounding?.source !== "video" && q.grounding?.timestampSeconds == null)
+    .map((q) => ({ ...q, grounding: { source: "lesson" as const, timestampSeconds: null } }));
+  return kept.length ? { questions: kept } : null;
+}
+
+/** Encola una lección para re-anclaje (cron backfill-videos de Track E la
+ *  drena vía reanchorLesson). Dedupe por pendiente; jamás lanza. */
+async function enqueueVideoBackfill(lessonId: string, reason: string): Promise<void> {
+  try {
+    const [pending] = await db
+      .select({ id: videoBackfillQueue.id })
+      .from(videoBackfillQueue)
+      .where(and(eq(videoBackfillQueue.lessonId, lessonId), isNull(videoBackfillQueue.processedAt)))
+      .limit(1);
+    if (pending) return;
+    await db.insert(videoBackfillQueue).values({ lessonId, reason });
+  } catch (e) {
+    console.error(`[generation] no se pudo encolar backfill de video (${lessonId}):`, e);
+  }
+}
+
+/** videos.list en lotes de 50 (A-P2: 24 lecciones = 24 unidades → 1 por lote).
+ *  Devuelve null si la API falló: el caller trata "desconocido" como vivo
+ *  (servir el canon tal cual es más seguro que des-anclarlo por un 503). */
+async function getVideoDetailsBatched(ids: string[]): Promise<Map<string, FreshVideo> | null> {
+  const map = new Map<string, FreshVideo>();
+  if (!ids.length) return map;
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      const fresh = await getVideoDetails(ids.slice(i, i + 50));
+      for (const f of fresh) map.set(f.videoId, f);
+    }
+    return map;
+  } catch (e) {
+    console.error(`[generation] videos.list en lote falló (se asume canon vivo):`, e);
+    return null;
+  }
+}
+
+/** Renderiza el contexto acumulado del curso para una lección (A-P0.2).
+ *  Determinístico por esqueleto: la lección canónica N siempre se escribe con
+ *  el mismo prefijo → compatible con lesson_content_cache. */
+function renderCourseContext(args: {
+  skeleton: PathSkeleton;
+  memory: ModuleMemory[];
+  vocab: Set<string>;
+  mi: number;
+  li: number;
+  globalIndex: number;
+  totalLessons: number;
+  siblings: { title: string; summary: string }[];
+}): string {
+  const { skeleton, memory, vocab, mi, li } = args;
+  const lines: string[] = [];
+  const map = skeleton.modules
+    .map((m, i) => `${i === mi ? "► " : ""}${i + 1}. ${m.title}`)
+    .join(" · ");
+  lines.push(`MAPA DE LA RUTA (módulo actual marcado con ►): ${map}`);
+  lines.push(
+    `Estás escribiendo la lección ${mi + 1}.${li + 1} (la ${args.globalIndex} de ${args.totalLessons} de la ruta).`,
+  );
+  if (skeleton.narrativeThread) lines.push(`HILO DEL CURSO: ${skeleton.narrativeThread}`);
+  const buildsOn = skeleton.modules[mi]?.buildsOn;
+  if (buildsOn) lines.push(`ESTE MÓDULO CONSTRUYE SOBRE: ${buildsOn}`);
+  if (memory.some((m) => m.lessons.length)) {
+    lines.push("", "LO YA ENSEÑADO (no lo re-expliques; referéncialo y construye sobre ello):");
+    memory.forEach((mod, i) => {
+      for (const l of mod.lessons) {
+        lines.push(`[Módulo ${i + 1} · Lección ${l.label} «${l.title}»]: ${l.takeaways.slice(0, 2).join("; ")}`);
+      }
+    });
+  }
+  if (vocab.size) {
+    lines.push(
+      "",
+      `VOCABULARIO YA INTRODUCIDO (úsalo con consistencia; si el video usa otro término, aclara la equivalencia una vez): ${[...vocab].slice(0, 40).join(", ")}`,
+    );
+  }
+  if (args.siblings.length) {
+    lines.push("", "LECCIONES HERMANAS DE ESTE MÓDULO (no te superpongas con ellas):");
+    for (const s of args.siblings) lines.push(`- ${s.title}: ${s.summary}`);
+  }
+  return lines.join("\n");
+}
+
+/** Takeaways de módulos ANTERIORES para la pregunta de repaso espaciado del
+ *  quiz (A-P0.2). null en el primer módulo. */
+function renderQuizReviewContext(memory: ModuleMemory[]): string | null {
+  const picks: string[] = [];
+  for (let i = memory.length - 1; i >= 0 && picks.length < 3; i--) {
+    const mod = memory[i]!;
+    const lesson = mod.lessons.at(-1);
+    const tk = lesson?.takeaways[0];
+    if (tk) picks.push(`- [Módulo ${i + 1} «${mod.moduleTitle}»] ${tk}`);
+  }
+  if (!picks.length) return null;
+  return `TAKEAWAYS DE MÓDULOS ANTERIORES (úsalos para la pregunta de repaso espaciado):\n${picks.join("\n")}`;
+}
+
 /**
  * Orquesta la generación PROGRESIVA de una ruta:
- * 1) Planifica el esqueleto (Opus o caché de cabeza gruesa).
- * 2) Inserta TODA la estructura (módulos + stubs de lección) y marca la ruta
- *    'ready' de inmediato → el usuario ve el árbol completo y puede empezar.
- * 3) Rellena el contenido por módulo EN ORDEN (los primeros primero); cada
- *    lección queda disponible apenas se genera. El progreso se publica en vivo.
- * Idempotente (upserts + guard de progreso) y tolerante a fallos.
+ * 1) Planifica el esqueleto CANÓNICO goal-neutral (Opus o caché de cabeza
+ *    gruesa) — decisión fundador Opción A.
+ * 2) Inserta TODA la estructura y marca la ruta 'ready' → el usuario ve el
+ *    árbol completo; el OVERLAY por ruta (route_intro + personal_note, Haiku)
+ *    escribe lo "hecho para ti" SIN tocar el canon.
+ * 3) Rellena el contenido por módulo EN ORDEN con CONTEXTO ACUMULADO (los
+ *    módulos conversan); cada lección queda disponible apenas se genera.
+ * Idempotente (upserts + guard de progreso) y tolerante a fallos parciales
+ * (allSettled por lección; el retry regenera solo lo que falta).
  */
 export async function runPathGeneration(pathId: string): Promise<void> {
   const [path] = await db
@@ -69,24 +250,56 @@ export async function runPathGeneration(pathId: string): Promise<void> {
       weeklyHours: meta.weeklyHours,
     };
 
+    // Señales del wizard persistidas SERVER-SIDE por Track B en el intent
+    // (jamás desde el intake del cliente: el cacheKey canónico es envenenable).
+    const [intent] = await db
+      .select({
+        canonicalTopic: routeIntents.canonicalTopic,
+        wizardAnswers: routeIntents.wizardAnswers,
+        preview: routeIntents.preview,
+      })
+      .from(routeIntents)
+      .where(eq(routeIntents.pathId, pathId))
+      .limit(1);
+    const wizardPayload = (intent?.wizardAnswers ?? null) as { variant?: string | null } | null;
+    const variant = wizardPayload?.variant ?? null;
+    // Paywall honesto (B-P0.3): el borrador de temario que el comprador VIO.
+    const promisedModules = intent?.preview?.modules ?? null;
+
     // --- NIVEL 1 con CACHÉ DE CABEZA GRUESA ---
-    const cacheKey = `${intake.topic.toLowerCase().trim()}-${intake.level}-${intake.language}`;
+    const cacheKey = buildSkeletonCacheKey({
+      topic: intake.topic,
+      canonicalTopic: intent?.canonicalTopic,
+      variant,
+      level: intake.level,
+      language: intake.language,
+    });
+
+    const bumpSkeletonReuse = (id: string) =>
+      db
+        .update(skeletonCache)
+        .set({ timesReused: sql`${skeletonCache.timesReused} + 1`, updatedAt: new Date() })
+        .where(eq(skeletonCache.id, id));
+
     const [cached] = await db
       .select()
       .from(skeletonCache)
-      .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, 1)))
+      .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, PROMPT_VERSION)))
       .limit(1);
 
     let skeleton: PathSkeleton;
     if (cached) {
       skeleton = cached.skeleton as PathSkeleton;
-      await db
-        .update(skeletonCache)
-        .set({ timesReused: sql`${skeletonCache.timesReused} + 1`, updatedAt: new Date() })
-        .where(eq(skeletonCache.id, cached.id));
+      await bumpSkeletonReuse(cached.id);
     } else {
-      skeleton = await generatePathSkeleton(intake);
-      await db
+      // canonical: true (Opción A) — el esqueleto compartido se diseña
+      // goal-neutral; la meta del comprador vive en el overlay por ruta.
+      skeleton = await generatePathSkeleton(intake, {
+        canonical: true,
+        promisedModules,
+        tracking: { pathId },
+      });
+      const inserted = await db
         .insert(skeletonCache)
         .values({
           cacheKey,
@@ -94,11 +307,25 @@ export async function runPathGeneration(pathId: string): Promise<void> {
           language: intake.language,
           level: intake.level,
           skeleton,
+          version: PROMPT_VERSION,
         })
-        .onConflictDoUpdate({
-          target: [skeletonCache.cacheKey, skeletonCache.version],
-          set: { timesReused: sql`${skeletonCache.timesReused} + 1`, updatedAt: new Date() },
-        });
+        .onConflictDoNothing({ target: [skeletonCache.cacheKey, skeletonCache.version] })
+        .returning({ id: skeletonCache.id });
+      if (!inserted.length) {
+        // CARRERA (A-P0.1): otro worker ganó el canon mientras generábamos.
+        // Hay que usar SU esqueleto: las celdas de lesson_content_cache van
+        // por (cacheKey, índice) y mezclarlas con NUESTROS títulos dejaría
+        // el canon corrupto de forma permanente (stub A con contenido B).
+        const [stored] = await db
+          .select()
+          .from(skeletonCache)
+          .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, PROMPT_VERSION)))
+          .limit(1);
+        if (stored) {
+          skeleton = stored.skeleton as PathSkeleton;
+          await bumpSkeletonReuse(stored.id);
+        }
+      }
     }
 
     const totalLessons = skeleton.modules.reduce(
@@ -154,10 +381,13 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             orderIndex: li,
             title: ls.title,
             estimatedMinutes: ls.estimatedMinutes,
+            // stub_summary persistido (A-P2): reanchorLesson y los backfills
+            // lo necesitan — antes se descartaba tras insertar.
+            stubSummary: ls.summary,
           })
           .onConflictDoUpdate({
             target: [lessonsT.moduleId, lessonsT.orderIndex],
-            set: { title: ls.title, estimatedMinutes: ls.estimatedMinutes },
+            set: { title: ls.title, estimatedMinutes: ls.estimatedMinutes, stubSummary: ls.summary },
           })
           .returning();
         if (lesson) lessons.push({ id: lesson.id, ls });
@@ -176,22 +406,72 @@ export async function runPathGeneration(pathId: string): Promise<void> {
       })
       .where(eq(learningPaths.id, pathId));
 
+    // --- OVERLAY DE PERSONALIZACIÓN POR RUTA (A-P0.3, Opción A) ---
+    // El esqueleto y las lecciones son canónicos goal-neutral; lo "hecho para
+    // ti" se escribe AQUÍ (route_intro + personal_note por módulo, Haiku,
+    // ~$0.005/ruta) y JAMÁS entra al caché. Si falla, no bloquea nada.
+    if (!path.routeIntro) {
+      try {
+        const overlay = await generateRouteOverlay({
+          routeTitle: skeleton.title,
+          narrativeThread: skeleton.narrativeThread ?? null,
+          modules: skeleton.modules.map((m, i) => ({ index: i, title: m.title, objective: m.objective })),
+          goal: path.goal,
+          priorExperience: meta.priorExperience ?? null,
+          level: skeleton.level,
+          language: intake.language,
+          tracking: { pathId },
+        });
+        await db
+          .update(learningPaths)
+          .set({ routeIntro: overlay.routeIntro, updatedAt: new Date() })
+          .where(eq(learningPaths.id, pathId));
+        for (const n of overlay.moduleNotes) {
+          if (!Number.isInteger(n.moduleIndex) || n.moduleIndex < 0 || n.moduleIndex >= skeleton.modules.length) continue;
+          await db
+            .update(modulesT)
+            .set({ personalNote: n.note })
+            .where(and(eq(modulesT.pathId, pathId), eq(modulesT.orderIndex, n.moduleIndex)));
+        }
+      } catch (e) {
+        console.error(`[generation] overlay de personalización falló (no bloquea):`, e);
+      }
+    }
+
     // --- PASO 2: rellenar contenido por módulo EN ORDEN (prioriza los primeros);
-    //     lecciones del módulo en paralelo. Cada lección queda lista al instante. ---
+    //     lecciones del módulo en paralelo, módulos en serie → el contexto
+    //     acumulado (A-P0.2) es determinístico por esqueleto. ---
     let done = 0;
     let firstModuleEmailSent = false;
     // Un mismo video de YouTube no se repite entre lecciones de la ruta.
     const usedVideoIds = new Set<string>();
+    // Memoria del curso: qué se enseñó ya (takeaways) + vocabulario introducido.
+    const courseMemory: ModuleMemory[] = [];
+    const vocab = new Set<string>();
+    // Lecciones que fallaron: NO tumban el módulo (allSettled); al final del
+    // run se lanza para que el retry de Trigger regenere SOLO esas.
+    const failedLessons: string[] = [];
+
     const emitProgress = async (step: string) => {
       const pct =
         totalLessons > 0 ? 25 + Math.round((done / totalLessons) * 70) : 25;
       await db
         .update(learningPaths)
-        .set({ generationProgress: pct, generationStep: step, updatedAt: new Date() })
+        .set({
+          // GREATEST: los UPDATE de lecciones paralelas pueden aterrizar fuera
+          // de orden — el progreso jamás debe regredir en la UI (A-P2).
+          generationProgress: sql`GREATEST(${learningPaths.generationProgress}, ${pct})`,
+          generationStep: step,
+          updatedAt: new Date(),
+        })
         .where(eq(learningPaths.id, pathId));
     };
 
     for (const [mi, { m, lessons }] of plan.entries()) {
+      const lessonsBefore = plan
+        .slice(0, mi)
+        .reduce((n, p) => n + p.lessons.length, 0);
+
       // STAGE A — queries de video del módulo entero en 1 llamada Haiku
       // (desde los STUBS: el video se elige ANTES de escribir la lección).
       let queryByIndex = new Map<number, string>();
@@ -206,91 +486,143 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             summary: ls.summary,
           })),
           language: intake.language,
+          level: skeleton.level,
+          tracking: { pathId },
         });
         queryByIndex = new Map(q.queries.map((x) => [x.lessonIndex, x.query]));
       } catch (e) {
         console.error(`[generation] queries de video fallaron (módulo ${m.title}):`, e);
       }
 
-      await Promise.all(
-        lessons.map(async ({ id: lessonId, ls }, li) => {
-          // CACHÉ DE CONTENIDO: si otro usuario del mismo esqueleto ya pagó
-          // esta lección, se reutiliza entera (contenido + quiz) — la ruta
-          // repetida cuesta ~$0 y se genera en segundos.
-          const [cachedLesson] = await db
-            .select()
-            .from(lessonContentCache)
-            .where(
-              and(
-                eq(lessonContentCache.cacheKey, cacheKey),
-                eq(lessonContentCache.moduleIndex, mi),
-                eq(lessonContentCache.lessonIndex, li),
-                eq(lessonContentCache.version, 1),
-              ),
-            )
-            .limit(1);
+      // Prefetch del canon del módulo (1 query) + metadatos frescos de TODOS
+      // sus videos en lotes de 50 (A-P2: antes era 1 unidad por lección).
+      let cachedByLesson = new Map<number, CachedLessonRow>();
+      try {
+        const rows = await db
+          .select()
+          .from(lessonContentCache)
+          .where(
+            and(
+              eq(lessonContentCache.cacheKey, cacheKey),
+              eq(lessonContentCache.moduleIndex, mi),
+              eq(lessonContentCache.version, PROMPT_VERSION),
+            ),
+          );
+        cachedByLesson = new Map(rows.map((r) => [r.lessonIndex, r]));
+      } catch (e) {
+        console.error(`[generation] lectura del canon falló (módulo ${mi}):`, e);
+      }
+      const allCachedIds = [
+        ...new Set(
+          [...cachedByLesson.values()].flatMap((r) => (r.videoIds as string[] | null) ?? []),
+        ),
+      ];
+      const freshById = await getVideoDetailsBatched(allCachedIds);
+
+      const settled = await Promise.allSettled(
+        lessons.map(async ({ id: lessonId, ls }, li): Promise<LessonOutcome> => {
+          const label = `${mi + 1}.${li + 1}`;
+          const cachedLesson = cachedByLesson.get(li);
+
+          /* ------------------------- CACHE HIT ------------------------- */
           if (cachedLesson) {
             const cachedContent = cachedLesson.content as LessonContent;
-            // VIDEO FIJADO: el canónico ya pasó el coverage gate y la
-            // videoGuide le pertenece. Re-consultamos metadatos FRESCOS
-            // (videos.list, 1 unidad) para cumplir los 30 días; si el video
-            // murió, recién ahí re-curamos desde cero.
-            const pinVideos = async () => {
-              const ids = (cachedLesson.videoIds as string[] | null) ?? [];
-              if (ids.length) {
-                const fresh = await getVideoDetails(ids);
-                const byId = new Map(fresh.map((f) => [f.videoId, f]));
-                const alive = ids.filter((id) => byId.has(id));
-                if (alive.length && byId.has(ids[0]!)) {
-                  for (const id of alive) usedVideoIds.add(id);
-                  await db
-                    .insert(videoCandidates)
-                    .values(
-                      alive.map((id, rank) => {
-                        const f = byId.get(id)!;
-                        return {
-                          lessonId,
-                          youtubeVideoId: id,
-                          title: f.title,
-                          channelTitle: f.channelTitle,
-                          rank,
-                          language: f.defaultLanguage ?? intake.language,
-                          durationSeconds: f.durationSeconds,
-                          reason: "canónico verificado (cache)",
-                          lastCheckedAt: new Date(),
-                        };
-                      }),
-                    )
-                    .onConflictDoNothing();
-                  return;
-                }
+            const cachedQuiz = (cachedLesson.quiz as GeneratedQuizData | null) ?? null;
+            const ids = (cachedLesson.videoIds as string[] | null) ?? [];
+            // Filas pre-migración (sin columnas de salud): se asume ancla = ids[0].
+            const isLegacy =
+              cachedLesson.hadDigest == null &&
+              cachedLesson.anchoredVideoId == null &&
+              cachedLesson.videoQuery == null;
+            const anchorId =
+              cachedLesson.anchoredVideoId ??
+              (cachedLesson.anchored !== false ? ids[0] ?? null : null);
+            // Canon honesto SIN video (el coverage gate rechazó al generar):
+            // no se cura por usuario — el gate ya decidió que no había video
+            // relevante. El HIT NO invierte el gate (A-P0.1).
+            const gateRejectedCanon =
+              !isLegacy &&
+              cachedLesson.anchored === false &&
+              (cachedLesson.videoCount ?? 0) === 0;
+
+            let contentToServe = cachedContent;
+            let quizToServe = cachedQuiz;
+
+            if (freshById) {
+              const alive = ids.filter((id) => freshById.has(id));
+              const anchorBroken = anchorId != null && alive[0] !== anchorId;
+              if (anchorBroken) {
+                // VIDEO ANCLA MUERTO (A-P0.1): la videoGuide y las preguntas
+                // con timestamp pertenecen al video viejo — servirlas con un
+                // video nuevo es la incoherencia que el pipeline de digests
+                // existe para impedir. Se sirve sin guía + quiz solo-lección,
+                // el canon queda des-anclado y la lección entra al backfill.
+                contentToServe = { ...cachedContent, videoGuide: null };
+                quizToServe = stripVideoGroundedQuestions(cachedQuiz);
+                await db
+                  .update(lessonContentCache)
+                  .set({
+                    content: contentToServe,
+                    quiz: quizToServe,
+                    anchored: false,
+                    anchoredVideoId: null,
+                    videoIds: alive,
+                    updatedAt: new Date(),
+                  })
+                  .where(eq(lessonContentCache.id, cachedLesson.id))
+                  .catch((e) => console.error(`[generation] no se pudo des-anclar el canon:`, e));
+                await enqueueVideoBackfill(lessonId, "link_rot");
               }
-              // Sin videos fijados o el principal murió → curación normal.
-              const vids = await curateAndSaveVideo(
-                lessonId,
-                queryByIndex.get(li) ?? ls.title,
-                m.objective,
-                intake.language,
-                skeleton.title,
-                usedVideoIds,
-              );
-              for (const v of vids) usedVideoIds.add(v.videoId);
-            };
+              if (alive.length) {
+                for (const id of alive) usedVideoIds.add(id);
+                await db
+                  .insert(videoCandidates)
+                  .values(
+                    alive.map((id, rank) => {
+                      const f = freshById.get(id)!;
+                      return {
+                        lessonId,
+                        youtubeVideoId: id,
+                        title: f.title,
+                        channelTitle: f.channelTitle,
+                        rank,
+                        language: f.defaultLanguage ?? intake.language,
+                        durationSeconds: f.durationSeconds,
+                        reason: anchorBroken
+                          ? "candidato del canon (ancla muerta, re-anclaje encolado)"
+                          : "canónico verificado (cache)",
+                        lastCheckedAt: new Date(),
+                      };
+                    }),
+                  )
+                  .onConflictDoNothing()
+                  .catch((e) => console.error(`[generation] pin de videos falló:`, e));
+              } else if (!gateRejectedCanon) {
+                // Ningún video del canon sigue vivo → curación fresca para
+                // ESTE usuario (la guía/quiz anclados ya se quitaron arriba).
+                const vids = await curateAndSaveVideo(
+                  lessonId,
+                  cachedLesson.videoQuery ?? queryByIndex.get(li) ?? ls.title,
+                  m.objective,
+                  intake.language,
+                  skeleton.title,
+                  usedVideoIds,
+                );
+                for (const v of vids) usedVideoIds.add(v.videoId);
+              }
+            }
 
             await Promise.all([
               db
                 .update(lessonsT)
                 .set({
-                  content: cachedContent,
-                  notes: cachedContent.keyTakeaways.join("\n• "),
+                  content: contentToServe,
+                  notes: contentToServe.keyTakeaways.join("\n• "),
                 })
                 .where(eq(lessonsT.id, lessonId)),
-              pinVideos().catch((e) =>
-                console.error(`[generation] pin de video falló:`, e),
-              ),
-              cachedLesson.quiz
-                ? saveQuizData(lessonId, ls.title, cachedLesson.quiz as GeneratedQuizData).catch(
-                    (e) => console.error(`[generation] quiz cacheado falló:`, e),
+              quizToServe?.questions?.length
+                ? saveQuizData(lessonId, ls.title, quizToServe).catch((e) =>
+                    console.error(`[generation] quiz cacheado falló:`, e),
                   )
                 : Promise.resolve(),
               db
@@ -303,15 +635,19 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             ]);
             done++;
             await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
-            return;
+            return { title: ls.title, label, takeaways: contentToServe.keyTakeaways };
           }
 
+          /* ------------------------- CACHE MISS ------------------------ */
           // STAGE B — curar video + digest del top-1 (con coverage gate).
           const query = queryByIndex.get(li) ?? ls.title;
+          // El ranker recibe lección específica + nivel DENTRO del objetivo
+          // (A-P1.7; curate.ts es de Track E — este es el canal existente).
+          const rankObjective = `${m.objective} · LECCIÓN: ${ls.title} — ${ls.summary} · NIVEL DEL ESTUDIANTE: ${skeleton.level}`;
           const vids = await curateAndSaveVideo(
             lessonId,
             query,
-            m.objective,
+            rankObjective,
             intake.language,
             skeleton.title,
             usedVideoIds,
@@ -330,17 +666,21 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                 language: intake.language,
                 durationSeconds: topVideo.durationSeconds ?? null,
               });
-              // Coverage gate: si el video no cubre la lección, prueba el #2
-              // (cap 2 digests/lección) y gana el de mejor cobertura real.
+              // Coverage gate con coverage EFECTIVO (penaliza nivel roto):
+              // si el video no cubre la lección, prueba el #2 y gana el mejor.
               const alt = vids[1];
-              if (ins && ins.digest.coverage < 0.5 && alt) {
+              if (ins && effectiveCoverage(ins.digest, skeleton.level) < 0.5 && alt) {
                 const altIns = await getVideoInsights({
                   videoId: alt.videoId,
                   lessonSummary: coverageSummary,
                   language: intake.language,
                   durationSeconds: alt.durationSeconds ?? null,
                 });
-                if (altIns && altIns.digest.coverage > ins.digest.coverage) {
+                if (
+                  altIns &&
+                  effectiveCoverage(altIns.digest, skeleton.level) >
+                    effectiveCoverage(ins.digest, skeleton.level)
+                ) {
                   ins = altIns;
                   topVideo = alt;
                   await swapVideoRanks(lessonId, alt.videoId).catch((e) =>
@@ -349,18 +689,14 @@ export async function runPathGeneration(pathId: string): Promise<void> {
                 }
               }
               // PISO DE COVERAGE: si ni el mejor candidato trata de lo que la
-              // lección necesita, mejor SIN video principal que uno irrelevante
-              // (caso real: video de ansiedad en ruta de fotografía).
-              if (ins && ins.digest.coverage < 0.35) {
+              // lección necesita, mejor SIN video principal que uno irrelevante.
+              // Se desactivan TODOS los candidatos (A-P0.1): antes solo caía
+              // el rank 0 y la UI promovía al rank 1 jamás verificado.
+              if (ins && effectiveCoverage(ins.digest, skeleton.level) < 0.35) {
                 await db
                   .update(videoCandidates)
                   .set({ isActive: false })
-                  .where(
-                    and(
-                      eq(videoCandidates.lessonId, lessonId),
-                      eq(videoCandidates.youtubeVideoId, topVideo.videoId),
-                    ),
-                  )
+                  .where(eq(videoCandidates.lessonId, lessonId))
                   .catch(() => {});
                 topVideo = null;
                 ins = null;
@@ -371,7 +707,19 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             }
           }
 
-          // STAGE C — lección ANCLADA al video (una sola llamada Sonnet).
+          // STAGE C — lección ANCLADA al video + CONTEXTO ACUMULADO (A-P0.2).
+          const courseContext = renderCourseContext({
+            skeleton,
+            memory: courseMemory,
+            vocab,
+            mi,
+            li,
+            globalIndex: lessonsBefore + li + 1,
+            totalLessons,
+            siblings: lessons
+              .filter((_, i) => i !== li)
+              .map(({ ls: sib }) => ({ title: sib.title, summary: sib.summary })),
+          });
           const content = await generateLessonContent({
             pathTitle: skeleton.title,
             moduleTitle: m.title,
@@ -381,13 +729,17 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             level: skeleton.level,
             language: intake.language,
             videoDigest: digest,
+            videoDurationSeconds: topVideo?.durationSeconds ?? null,
+            courseContext,
+            tracking: { pathId },
           });
           await db
             .update(lessonsT)
             .set({ content, notes: content.keyTakeaways.join("\n• ") })
             .where(eq(lessonsT.id, lessonId));
 
-          // STAGE D — quiz DESPUÉS de la lección, grounded en contenido + anclas.
+          // STAGE D — quiz DESPUÉS de la lección, grounded en contenido +
+          // anclas + 1 pregunta de repaso espaciado de módulos anteriores.
           const quizData = await generateAndSaveQuiz(
             lessonId,
             ls.title,
@@ -397,43 +749,87 @@ export async function runPathGeneration(pathId: string): Promise<void> {
             content,
             digest,
             topVideo?.durationSeconds ?? null,
+            { reviewContext: renderQuizReviewContext(courseMemory), pathId },
           ).catch((e) => {
             console.error(`[generation] quiz falló (lección ${lessonId}):`, e);
             return null;
           });
 
-          // Cachear el canónico: los siguientes usuarios del esqueleto reciben
-          // esta lección (y su quiz) gratis y al instante.
-          // Orden final de videos: el verificado por coverage primero.
-          const finalVideoIds = topVideo
-            ? [topVideo.videoId, ...vids.filter((v) => v.videoId !== topVideo!.videoId).map((v) => v.videoId)]
-            : vids.map((v) => v.videoId);
-          await db
-            .insert(lessonContentCache)
-            .values({
-              cacheKey,
-              moduleIndex: mi,
-              lessonIndex: li,
-              content,
-              quiz: quizData,
-              videoIds: finalVideoIds,
-            })
-            .onConflictDoNothing({
-              target: [
-                lessonContentCache.cacheKey,
-                lessonContentCache.moduleIndex,
-                lessonContentCache.lessonIndex,
-                lessonContentCache.version,
-              ],
-            })
-            .catch((e) =>
-              console.error(`[generation] cache de lección falló:`, e),
+          // GATE DE CALIDAD DEL CANON (A-P0.1): contenido degradado NO se
+          // cachea como canónico — se sirve a ESTE usuario y el siguiente
+          // miss lo reintenta completo. Ahorrarse $2 una vez no puede costar
+          // N ventas futuras degradadas.
+          const cacheable = quizData != null && (digest != null || vids.length > 0);
+          if (cacheable) {
+            // Orden final: el verificado por coverage primero. Si el gate
+            // rechazó todos los candidatos → canon honesto con videoIds: [].
+            const finalVideoIds = topVideo
+              ? [
+                  topVideo.videoId,
+                  ...vids.filter((v) => v.videoId !== topVideo!.videoId).map((v) => v.videoId),
+                ]
+              : [];
+            await db
+              .insert(lessonContentCache)
+              .values({
+                cacheKey,
+                moduleIndex: mi,
+                lessonIndex: li,
+                version: PROMPT_VERSION,
+                content,
+                quiz: quizData,
+                videoIds: finalVideoIds,
+                anchoredVideoId: digest && topVideo ? topVideo.videoId : null,
+                videoQuery: query,
+                hadDigest: digest != null,
+                coverage: digest?.coverage ?? null,
+                videoCount: finalVideoIds.length,
+                quizOk: true,
+                anchored: digest != null && topVideo != null,
+              })
+              .onConflictDoNothing({
+                target: [
+                  lessonContentCache.cacheKey,
+                  lessonContentCache.moduleIndex,
+                  lessonContentCache.lessonIndex,
+                  lessonContentCache.version,
+                ],
+              })
+              .catch((e) =>
+                console.error(`[generation] cache de lección falló:`, e),
+              );
+          } else {
+            console.warn(
+              `[generation] lección ${label} NO entra al canon (quiz=${quizData != null}, digest=${digest != null}, videos=${vids.length}) — el próximo miss la reintenta completa.`,
             );
+          }
+
+          // Vocabulario del curso: términos reales del video ancla.
+          if (digest) for (const t of digest.terminology.slice(0, 5)) vocab.add(t);
 
           done++;
           await emitProgress(`Lección ${done}/${totalLessons}: ${ls.title}`);
+          return { title: ls.title, label, takeaways: content.keyTakeaways };
         }),
       );
+
+      // allSettled (A-P0.1): una lección caída NO tumba el módulo ni los
+      // siguientes. Las fallidas se acumulan y el run termina lanzando para
+      // que el retry de Trigger regenere SOLO esas (idempotente por lección).
+      const moduleOutcomes: LessonOutcome[] = [];
+      settled.forEach((r, i) => {
+        if (r.status === "fulfilled") {
+          moduleOutcomes.push(r.value);
+        } else {
+          const t = lessons[i]?.ls.title ?? `lección ${i + 1}`;
+          failedLessons.push(`${mi + 1}.${i + 1} «${t}»`);
+          console.error(
+            `[generation] lección ${mi + 1}.${i + 1} "${t}" falló (las demás continúan):`,
+            r.reason,
+          );
+        }
+      });
+      courseMemory.push({ moduleTitle: m.title, lessons: moduleOutcomes });
 
       // El PRIMER módulo con contenido completo → correo "tu ruta está lista,
       // empieza por aquí" (uno solo por ruta; dedupe por moduleId).
@@ -457,6 +853,15 @@ export async function runPathGeneration(pathId: string): Promise<void> {
           });
         }
       }
+    }
+
+    if (failedLessons.length) {
+      // La ruta sigue 'ready' (lo generado se usa); el throw dispara el retry
+      // de Trigger, que resume vía caché y regenera SOLO las fallidas. Si los
+      // 3 intentos mueren, onFailure alerta "ready incompleta" al fundador.
+      throw new Error(
+        `[generation] ${failedLessons.length} lección(es) sin contenido tras el run: ${failedLessons.join(" · ")}.`,
+      );
     }
 
     // Contenido completo (la ruta ya estaba 'ready' desde el Paso 1).
@@ -533,6 +938,7 @@ export async function generateAndSaveQuiz(
   lessonContent?: LessonContent | null,
   videoDigest?: VideoDigest | null,
   videoDurationSeconds?: number | null,
+  opts?: { reviewContext?: string | null; pathId?: string | null },
 ): Promise<GeneratedQuizData> {
   const quiz = await generateQuiz({
     lessonTitle: title,
@@ -542,6 +948,8 @@ export async function generateAndSaveQuiz(
     lessonContent,
     videoDigest,
     videoDurationSeconds,
+    reviewContext: opts?.reviewContext ?? null,
+    tracking: { pathId: opts?.pathId ?? null },
   });
   await saveQuizData(lessonId, title, quiz);
   return quiz;
@@ -592,8 +1000,9 @@ export async function curateAndSaveVideo(
 }
 
 /** Promueve a rank 0 el video que ganó el coverage gate (swap seguro con el
- *  índice único lesson+rank: 0→99, ganador→0, 99→1). */
-async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
+ *  índice único lesson+rank: 0→99, ganador→0, 99→1). Exportada: extend.ts y
+ *  los backfills de Track E la consumen. */
+export async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
   await db.transaction(async (tx) => {
     await tx
       .update(videoCandidates)
@@ -618,14 +1027,17 @@ async function swapVideoRanks(lessonId: string, winnerVideoId: string) {
 /**
  * Re-ancla UNA lección ya generada: digest del video (con coverage gate sobre
  * el candidato #2) → regenera el contenido anclado → regenera el quiz grounded.
- * Para backfills de rutas generadas sin digest (p.ej. cuota de Gemini agotada).
+ * Para backfills de rutas generadas sin digest (p.ej. cuota de Gemini agotada)
+ * y para drenar video_backfill_queue (cron de Track E).
  */
 export async function reanchorLesson(lessonId: string): Promise<string> {
   const [row] = await db
     .select({
       lessonTitle: lessonsT.title,
+      stubSummary: lessonsT.stubSummary,
       moduleTitle: modulesT.title,
       moduleObjective: modulesT.objective,
+      pathId: learningPaths.id,
       pathTitle: learningPaths.title,
       level: learningPaths.level,
       language: learningPaths.language,
@@ -645,7 +1057,10 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     .limit(2);
   if (!vids.length) return "sin video";
 
-  const summary = `${row.lessonTitle} (contexto de la ruta: ${row.pathTitle})`;
+  // stub_summary real (A-P2): antes se usaba el título como summary y el
+  // coverage gate + la lección regenerada perdían la descripción original.
+  const baseSummary = row.stubSummary?.trim() ? row.stubSummary : row.lessonTitle;
+  const summary = `${baseSummary} (contexto de la ruta: ${row.pathTitle})`;
   let top = vids[0]!;
   let ins = await getVideoInsights({
     videoId: top.youtubeVideoId,
@@ -654,14 +1069,14 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     durationSeconds: top.durationSeconds ?? null,
   });
   const alt = vids[1];
-  if (ins && ins.digest.coverage < 0.5 && alt) {
+  if (ins && effectiveCoverage(ins.digest, row.level) < 0.5 && alt) {
     const altIns = await getVideoInsights({
       videoId: alt.youtubeVideoId,
       lessonSummary: summary,
       language: row.language,
       durationSeconds: alt.durationSeconds ?? null,
     });
-    if (altIns && altIns.digest.coverage > ins.digest.coverage) {
+    if (altIns && effectiveCoverage(altIns.digest, row.level) > effectiveCoverage(ins.digest, row.level)) {
       ins = altIns;
       top = alt;
       await swapVideoRanks(lessonId, alt.youtubeVideoId).catch(() => {});
@@ -674,10 +1089,12 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
     moduleTitle: row.moduleTitle,
     moduleObjective: row.moduleObjective ?? "",
     lessonTitle: row.lessonTitle,
-    lessonSummary: row.lessonTitle,
+    lessonSummary: baseSummary,
     level: row.level,
     language: row.language,
     videoDigest: ins.digest,
+    videoDurationSeconds: top.durationSeconds ?? null,
+    tracking: { pathId: row.pathId, label: "generator.reanchor" },
   });
   await db
     .update(lessonsT)
@@ -687,12 +1104,13 @@ export async function reanchorLesson(lessonId: string): Promise<string> {
   await generateAndSaveQuiz(
     lessonId,
     row.lessonTitle,
-    row.lessonTitle,
+    baseSummary,
     row.level,
     row.language,
     content,
     ins.digest,
     top.durationSeconds ?? null,
+    { pathId: row.pathId },
   );
   return `anclada (coverage ${ins.digest.coverage.toFixed(2)}, video ${top.youtubeVideoId})`;
 }

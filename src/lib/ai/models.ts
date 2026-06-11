@@ -13,9 +13,11 @@ export const MODELS = {
 
 export type ModelTier = keyof typeof MODELS;
 
-/** Límites de salida razonables por tarea (no-streaming → mantener < ~16k). */
+/** Límites de salida razonables por tarea (no-streaming → mantener < ~16k).
+ *  planner: un esqueleto real son 2-4K tokens; 12K solo añadía riesgo de
+ *  timeout non-streaming sin comprar nada (A-P1.8). */
 export const MAX_TOKENS = {
-  planner: 12000,
+  planner: 6000,
   generator: 8000,
   ranker: 2000,
 } as const;

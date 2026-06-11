@@ -35,18 +35,21 @@ const classSummarySchema = z.object({
       z.object({
         task: z.string().describe("Tarea concreta y accionable"),
         kind: z.enum(["retrieval", "aplicada"]),
-        relatedLessonTitle: z
-          .string()
+        // Índice numérico, NO título: los enteros no se parafrasean ("Iluminación
+        // natural" vs "Iluminación con luz natural" perdía el recurso).
+        relatedLessonIndex: z
+          .number()
+          .int()
           .nullable()
           .describe(
-            "Título EXACTO de la lección de la ruta que sirve de apoyo para esta tarea (de la lista LECCIONES DE LA RUTA), o null si ninguna aplica",
+            "Número EXACTO de la lección de apoyo según la lista numerada LECCIONES DE LA RUTA (la primera = 1), o null si ninguna aplica",
           ),
       }),
     )
     .describe("Las tareas que el profesor asignó en el cierre (3-5); si no asignó, derívalas de lo trabajado"),
 });
 
-const SUMMARIZE_INSTRUCTIONS = `Destilas la transcripción de una clase particular en español. REGLAS: solo hechos presentes en la transcripción (jamás inventes); las tareas deben ser las que el profesor dijo en el cierre (o derivadas directamente de lo practicado); tono cálido y concreto.`;
+const SUMMARIZE_INSTRUCTIONS = `Destilas la transcripción de una clase particular en español. REGLAS: solo hechos presentes en la transcripción (jamás inventes); las tareas deben ser las que el profesor dijo en el cierre (o derivadas directamente de lo practicado); si el profesor ejecutó acciones (líneas [acción del profesor: …] como agregar un módulo o agendar la próxima clase), el resumen las menciona; tono cálido y concreto.`;
 
 export async function summarizeClass(sessionId: string): Promise<string> {
   const [session] = await db
@@ -103,6 +106,30 @@ async function processTranscript(
   session: SessionRow,
   transcript: Awaited<ReturnType<typeof getConversationTranscript>>,
 ): Promise<string> {
+  // Ruta + profesor primero: validan la conversación y alimentan el correo.
+  const [pathRow] = await db
+    .select({ title: learningPaths.title, cacheKey: learningPaths.skeletonCacheKey })
+    .from(learningPaths)
+    .where(eq(learningPaths.id, session.pathId))
+    .limit(1);
+  const [teacher] = pathRow?.cacheKey
+    ? await db
+        .select({ name: routeAgents.name, elId: routeAgents.elevenlabsAgentId })
+        .from(routeAgents)
+        .where(eq(routeAgents.cacheKey, pathRow.cacheKey))
+        .limit(1)
+    : [];
+
+  // SEGURIDAD: la conversación debe ser DEL AGENTE de esta ruta. Un
+  // conversationId ajeno (attachConversationAction acepta strings del
+  // cliente) no puede inyectar resumen/tareas/memoria de otra conversación.
+  if (transcript.agentId && teacher?.elId && transcript.agentId !== teacher.elId) {
+    await db
+      .update(liveSessions)
+      .set({ summary: { invalid: "agent_mismatch" }, updatedAt: new Date() })
+      .where(eq(liveSessions.id, sessionId));
+    return "conversación de otro agente — descartada (sin correo)";
+  }
 
   // Duración real (más confiable que la estimada del cliente).
   if (transcript.durationSec > 0) {
@@ -117,28 +144,28 @@ async function processTranscript(
     .join("\n")
     .slice(0, 40_000);
 
-  // Lecciones reales de la ruta → recursos INTERNOS verificables por tarea
-  // (la IA solo puede citar títulos de esta lista; nada inventado).
+  // Lecciones reales de la ruta, NUMERADAS → recursos INTERNOS verificables
+  // por tarea (la IA solo puede citar índices de esta lista; nada inventado).
   const pathLessons = await db
     .select({ id: lessons.id, title: lessons.title })
     .from(lessons)
     .innerJoin(modules, eq(lessons.moduleId, modules.id))
-    .where(eq(modules.pathId, session.pathId));
-  const lessonByTitle = new Map(
-    pathLessons.map((l) => [l.title.toLowerCase().trim(), l.id]),
-  );
+    .where(eq(modules.pathId, session.pathId))
+    .orderBy(modules.orderIndex, lessons.orderIndex);
 
   const client = getAnthropic();
   const res = await client.messages.parse({
     model: MODELS.ranker,
     max_tokens: 2000,
+    // Extracción de hechos, no creatividad: varianza baja.
+    temperature: 0.2,
     system: cachedSystem(SUMMARIZE_INSTRUCTIONS),
     output_config: { format: zodOutputFormat(classSummarySchema) },
     messages: [
       {
         role: "user",
         content: [
-          `LECCIONES DE LA RUTA (únicos títulos válidos para relatedLessonTitle):\n${pathLessons.map((l) => `- ${l.title}`).join("\n")}`,
+          `LECCIONES DE LA RUTA (cita lecciones SOLO por su número):\n${pathLessons.map((l, i) => `${i + 1}. ${l.title}`).join("\n")}`,
           `TRANSCRIPCIÓN DE LA CLASE:\n${convoText}`,
         ].join("\n\n"),
       },
@@ -157,21 +184,22 @@ async function processTranscript(
   if (distilled.homework.length) {
     await db.insert(homeworkItems).values(
       distilled.homework.slice(0, 5).map((h) => {
-        // Recurso interno: link a la lección de apoyo SOLO si existe de verdad.
-        const lessonId = h.relatedLessonTitle
-          ? lessonByTitle.get(h.relatedLessonTitle.toLowerCase().trim())
-          : undefined;
+        // Recurso interno: link a la lección de apoyo SOLO si el índice es real.
+        const lesson =
+          h.relatedLessonIndex && h.relatedLessonIndex >= 1 && h.relatedLessonIndex <= pathLessons.length
+            ? pathLessons[h.relatedLessonIndex - 1]
+            : undefined;
         return {
           sessionId,
           userId: session.userId,
           pathId: session.pathId,
           task: h.task,
           kind: h.kind,
-          resources: lessonId
+          resources: lesson
             ? [
                 {
-                  title: h.relatedLessonTitle!,
-                  href: `/app/rutas/${session.pathId}/leccion/${lessonId}`,
+                  title: lesson.title,
+                  href: `/app/rutas/${session.pathId}/leccion/${lesson.id}`,
                 },
               ]
             : [],
@@ -179,6 +207,21 @@ async function processTranscript(
       }),
     );
   }
+
+  // Cerrar el loop de tareas: las completadas que el brief de ESTA clase le
+  // mostró al profesor (para celebrarlas) quedan marcadas como repasadas —
+  // la próxima clase no las re-celebra. Las nuevas de hoy nacen done=false.
+  await db
+    .update(homeworkItems)
+    .set({ reviewedInSessionId: sessionId })
+    .where(
+      and(
+        eq(homeworkItems.userId, session.userId),
+        eq(homeworkItems.pathId, session.pathId),
+        eq(homeworkItems.done, true),
+        isNull(homeworkItems.reviewedInSessionId),
+      ),
+    );
 
   const [existing] = await db
     .select({ id: learnerProfiles.id, profile: learnerProfiles.profile })
@@ -191,11 +234,28 @@ async function processTranscript(
     )
     .limit(1);
   const prevProfile = (existing?.profile as Record<string, unknown>) ?? {};
+  // Memoria ACUMULATIVA, no foto: la clase 2 ya no borra lo aprendido en la 1.
+  // Trabas con dedupe (case-insensitive) y cap 6 FIFO (quedan las recientes).
+  const prevStruggles = Array.isArray(prevProfile.recentStruggles)
+    ? (prevProfile.recentStruggles as string[])
+    : [];
+  const seen = new Set<string>();
+  const mergedStruggles = [...prevStruggles, ...distilled.struggles]
+    .filter((s) => {
+      const k = s.toLowerCase().trim();
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(-6);
   const mergedProfile = {
     ...prevProfile,
     lastClassAt: new Date().toISOString(),
     lastHighlight: distilled.highlight,
-    recentStruggles: distilled.struggles.slice(0, 3),
+    recentStruggles: mergedStruggles,
+    classCount: (Number(prevProfile.classCount) || 0) + 1,
+    // exitTicket lo escribe la tool registrar_aprendizaje durante la clase.
+    ...(session.exitTicket ? { lastExitTicket: session.exitTicket } : {}),
   };
   if (existing) {
     await db
@@ -210,26 +270,16 @@ async function processTranscript(
     });
   }
 
-  // Correo con resumen + tareas (el outbox dedupea por sessionId).
-  const [pathRow] = await db
-    .select({ title: learningPaths.title, cacheKey: learningPaths.skeletonCacheKey })
-    .from(learningPaths)
-    .where(eq(learningPaths.id, session.pathId))
-    .limit(1);
-  const [teacher] = pathRow?.cacheKey
-    ? await db
-        .select({ name: routeAgents.name })
-        .from(routeAgents)
-        .where(eq(routeAgents.cacheKey, pathRow.cacheKey))
-        .limit(1)
-    : [];
+  // Correo con resumen + tareas (el outbox dedupea por sessionId). Sin
+  // emojis (regla de marca: gesto = texto); el prefijo "Tarea:" separa lo
+  // accionable del resumen dentro de la plantilla actual.
   await enqueueProgressEmail(session.userId, "class_summary", sessionId, {
     pathId: session.pathId,
     pathTitle: pathRow?.title ?? "tu ruta",
     moduleTitle: teacher?.name ?? "tu profesor",
     lessonTitles: [
       ...distilled.summary.slice(0, 3),
-      ...distilled.homework.map((h) => `📝 ${h.task}`),
+      ...distilled.homework.map((h) => `Tarea: ${h.task}`),
     ],
   });
 

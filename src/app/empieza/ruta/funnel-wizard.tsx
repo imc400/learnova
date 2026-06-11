@@ -15,7 +15,7 @@ import {
   publicWizardQuestionsAction,
   createAccountAndIntentAction,
 } from "@/server/actions/funnel";
-import type { WizardQuestion } from "@/lib/ai/wizard";
+import type { TopicCheck, WizardQuestion } from "@/lib/ai/wizard";
 
 /*
   Wizard del EMBUDO DE VENTA (sin cuenta previa):
@@ -33,6 +33,10 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
   const [topic, setTopic] = useState("");
   const [level, setLevel] = useState("principiante");
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
+  const [topicCheck, setTopicCheck] = useState<TopicCheck | null>(null);
+  // Calibración de nivel: si el usuario decide mantener su nivel declarado,
+  // no se le vuelve a sugerir el cambio en esta pasada.
+  const [levelKept, setLevelKept] = useState(false);
   const [answers, setAnswers] = useState<Answers>({});
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -49,8 +53,19 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
     startQ(async () => {
       try {
         const res = await publicWizardQuestionsAction({ topic: topic.trim(), level, language: "es" });
+        // Gate de viabilidad: con tema inseguro/inviable NO se avanza hacia
+        // el pago (hoy se podía pagar por una ruta que la IA iba a rehusar).
+        if (res.topicCheck.verdict === "inseguro" || res.topicCheck.verdict === "inviable") {
+          setError(
+            res.topicCheck.note ??
+              "Ese tema no lo podemos convertir en una ruta. Prueba contarlo con otras palabras.",
+          );
+          return;
+        }
+        setTopicCheck(res.topicCheck);
         setQuestions(res.questions);
         setAnswers({});
+        setLevelKept(false);
         setStep(2);
       } catch {
         setError("No pudimos preparar tus preguntas. Intenta de nuevo.");
@@ -87,6 +102,75 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [questions, answers],
   );
+
+  // Calibración de nivel: la respuesta de experiencia trae el nivel REAL que
+  // revela (levelSignal). Si contradice el nivel declarado (un <select> que
+  // nadie toca), se sugiere corregirlo — el level es 1/3 de la cache key y
+  // etiqueta el canon para futuros usuarios.
+  const levelSuggestion = useMemo(() => {
+    if (levelKept) return null;
+    for (const q of questions) {
+      if (q.mapsTo !== "priorExperience") continue;
+      const sel = answers[q.id]?.selected ?? [];
+      for (const o of q.options) {
+        if (o.levelSignal && o.levelSignal !== level && sel.includes(o.text)) {
+          return o.levelSignal;
+        }
+      }
+    }
+    return null;
+  }, [questions, answers, level, levelKept]);
+
+  /** Arquetipo de la meta elegida ("Otro" con texto libre → "otro"). */
+  const deriveArchetype = (): string | null => {
+    for (const q of questions) {
+      if (!q.options.some((o) => o.archetype)) continue;
+      const a = answers[q.id];
+      if (!a) continue;
+      for (const o of q.options) {
+        if (o.archetype && a.selected.includes(o.text)) return o.archetype;
+      }
+      if (a.selected.includes(OTHER) && a.other.trim()) return "otro";
+    }
+    return null;
+  };
+
+  /** Slug del medio/equipo elegido (faceta legítima del caché — Track A). */
+  const deriveVariant = (): string | null => {
+    for (const q of questions) {
+      const a = answers[q.id];
+      if (!a) continue;
+      for (const o of q.options) {
+        if (o.variant && a.selected.includes(o.text)) return o.variant;
+      }
+    }
+    return null;
+  };
+
+  /** Respuestas estructuradas para route_intents.wizard_answers (analítica,
+   *  brief del profesor, re-facetado del caché sin re-preguntar). */
+  const buildWizardAnswers = () =>
+    questions
+      .map((q) => {
+        const a = answers[q.id];
+        const selected = (a?.selected ?? [])
+          .filter((v) => v !== OTHER && v.trim())
+          .slice(0, 8)
+          .map((s) => s.slice(0, 140));
+        const other =
+          a?.selected.includes(OTHER) && a.other.trim()
+            ? a.other.trim().slice(0, 300)
+            : null;
+        return {
+          id: q.id.slice(0, 60),
+          label: q.label.slice(0, 200),
+          kind: q.kind,
+          mapsTo: q.mapsTo,
+          selected,
+          other,
+        };
+      })
+      .filter((ans) => ans.selected.length > 0 || ans.other);
 
   const phoneValid = /^\+?\d{8,15}$/.test(phone.trim().replace(/[\s().-]/g, ""));
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
@@ -138,16 +222,19 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
     startCreate(async () => {
       try {
         const res = await createAccountAndIntentAction({
+          plan,
           name: name.trim(),
           email: email.trim(),
           password,
           phone: phone.trim(),
           topic: intake.topic,
           goal: intake.goal,
-          metaDisplay: intake.metaDisplay,
           level,
           language: "es",
           priorExperience: intake.priorExperience,
+          goalArchetype: deriveArchetype(),
+          variant: deriveVariant(),
+          wizardAnswers: buildWizardAnswers(),
         });
         // Si vuelve, es un error de formulario (el éxito redirige solo).
         if (res && !res.ok) {
@@ -245,6 +332,12 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
       {step === 2 && (
         <div className={stepCard}>
           <p className="hand inline-block rotate-[-2deg]">tus respuestas diseñan la ruta ✺</p>
+          {(topicCheck?.verdict === "ambiguo" || topicCheck?.verdict === "muy_amplio") &&
+            topicCheck.note && (
+              <NotaBanner tone="aviso" className="mt-3">
+                {topicCheck.note}
+              </NotaBanner>
+            )}
           <div className="mt-4 flex flex-col gap-6">
             {questions.map((q) => {
               const a = answers[q.id];
@@ -270,7 +363,7 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
                       aria-labelledby={`q-${q.id}-label`}
                       className="flex flex-wrap gap-2"
                     >
-                      {[...q.options, OTHER].map((opt) => {
+                      {[...q.options.map((o) => o.text), OTHER].map((opt) => {
                         const isOther = opt === OTHER;
                         const active = a?.selected.includes(opt) ?? false;
                         return (
@@ -304,6 +397,21 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
                 </div>
               );
             })}
+            {levelSuggestion && (
+              <NotaBanner tone="aviso">
+                Por tu respuesta, te conviene partir en{" "}
+                <span className="font-bold capitalize">{levelSuggestion}</span> —
+                ¿lo cambiamos?
+                <span className="mt-2 flex flex-wrap gap-2">
+                  <Button size="sm" type="button" onClick={() => setLevel(levelSuggestion)}>
+                    Sí, partir en {levelSuggestion}
+                  </Button>
+                  <Button size="sm" type="button" variant="outline" onClick={() => setLevelKept(true)}>
+                    Mantener {level}
+                  </Button>
+                </span>
+              </NotaBanner>
+            )}
             <div className="flex items-center gap-3">
               <Button variant="outline" size="icon" className="size-11" onClick={() => setStep(1)} aria-label="Volver">
                 <ArrowLeft className="size-4" />
@@ -348,21 +456,18 @@ export function FunnelWizard({ plan }: { plan?: "pro" }) {
               <Input id="f-pass" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 8 caracteres" autoComplete="new-password" className="text-base" />
             </div>
             <div className="flex flex-wrap justify-center gap-2">
+              {/* El precio del badge sigue al plan elegido en la landing. */}
               <Badge variant="outline" className="bg-card">
                 <Seal size={16} />
-                {formatPrice(site.pricing.singlePath, "CLP")} una vez, tuya para siempre
+                {plan === "pro"
+                  ? `${formatPrice(site.pricing.proThirtyDays, "CLP")} por 30 días · sin cobro automático`
+                  : `${formatPrice(site.pricing.singlePath, "CLP")} una vez, tuya para siempre`}
               </Badge>
               <Badge variant="outline" className="bg-card">
                 <Shield size={16} />
                 Garantía de 7 días
               </Badge>
             </div>
-            {plan === "pro" && (
-              <p className="text-center text-xs text-muted-foreground">
-                Te interesa Aulia Pro: {formatPrice(site.pricing.proThirtyDays, "CLP")} por
-                30 días, sin cobro automático. Lo eliges en el paso de pago.
-              </p>
-            )}
             <div className="mt-1 flex items-center gap-3">
               <Button type="button" variant="outline" size="icon" className="size-11" onClick={() => setStep(2)} disabled={creating} aria-label="Volver">
                 <ArrowLeft className="size-4" />

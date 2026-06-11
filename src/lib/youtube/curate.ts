@@ -10,6 +10,9 @@ import { db } from "@/db";
 import { youtubeSearchCache } from "@/db/schema";
 
 const SEARCH_CACHE_TTL_MS = 21 * 24 * 60 * 60 * 1000; // 21 días
+// Resultados VACÍOS también se cachean, con TTL corto (E-P2): una query de
+// nicho sin resultados re-quemaba 100-200 unidades en CADA generación.
+const EMPTY_SEARCH_TTL_MS = 3 * 24 * 60 * 60 * 1000; // 3 días
 
 /**
  * Búsqueda en YouTube con CACHÉ (conserva cuota: search.list = 100 unidades).
@@ -28,29 +31,30 @@ async function cachedSearchIds(
     .from(youtubeSearchCache)
     .where(eq(youtubeSearchCache.cacheKey, cacheKey))
     .limit(1);
-  if (
-    !force &&
-    hit &&
-    Array.isArray(hit.videoIds) &&
-    hit.videoIds.length &&
-    Date.now() - hit.updatedAt.getTime() < SEARCH_CACHE_TTL_MS
-  ) {
-    await db
-      .update(youtubeSearchCache)
-      .set({ timesReused: sql`${youtubeSearchCache.timesReused} + 1` })
-      .where(eq(youtubeSearchCache.id, hit.id));
-    return hit.videoIds;
+  if (hit && Array.isArray(hit.videoIds)) {
+    const age = Date.now() - hit.updatedAt.getTime();
+    // Vacío fresco: NO re-buscar — ni siquiera con force (el force existe
+    // para IDs caídos; un vacío reciente seguirá vacío y cuesta 100 u.).
+    if (hit.videoIds.length === 0 && age < EMPTY_SEARCH_TTL_MS) {
+      return [];
+    }
+    if (!force && hit.videoIds.length && age < SEARCH_CACHE_TTL_MS) {
+      await db
+        .update(youtubeSearchCache)
+        .set({ timesReused: sql`${youtubeSearchCache.timesReused} + 1` })
+        .where(eq(youtubeSearchCache.id, hit.id));
+      return hit.videoIds;
+    }
   }
   const ids = await searchVideos(query, { maxResults: 15, language });
-  if (ids.length) {
-    await db
-      .insert(youtubeSearchCache)
-      .values({ cacheKey, query, language: lang, videoIds: ids })
-      .onConflictDoUpdate({
-        target: youtubeSearchCache.cacheKey,
-        set: { videoIds: ids, updatedAt: new Date() },
-      });
-  }
+  // Upsert SIEMPRE (incluso []): cachear el vacío es lo que protege la cuota.
+  await db
+    .insert(youtubeSearchCache)
+    .values({ cacheKey, query, language: lang, videoIds: ids })
+    .onConflictDoUpdate({
+      target: youtubeSearchCache.cacheKey,
+      set: { videoIds: ids, updatedAt: new Date() },
+    });
   return ids;
 }
 
@@ -153,6 +157,9 @@ export async function curateVideoForLesson(args: {
               views: c.viewCount,
               likes: c.likeCount,
               captions: c.hasCaptions,
+              // E-P1.5: el criterio de "recencia" del prompt del ranker se
+              // alucinaba — ahora ve la fecha real de publicación.
+              publishedAt: c.publishedAt,
             })),
           ),
           "",

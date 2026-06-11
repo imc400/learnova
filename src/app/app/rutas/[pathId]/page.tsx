@@ -13,10 +13,12 @@ import {
   Sparkles,
   GraduationCap,
 } from "lucide-react";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { moduleRatings, homeworkItems, liveSessions, learningPaths } from "@/db/schema";
+import { getEntitlement } from "@/lib/subscription";
+import { env } from "@/lib/env";
 import { getPathTree } from "@/server/queries/paths";
 import { startClassAction, toggleHomeworkAction } from "@/server/actions/live";
 import { SubmitButton } from "@/components/app/submit-button";
@@ -72,11 +74,11 @@ const CLASS_ERRORS: Record<string, { text: string; cta?: { href: string; label: 
   },
   cupo_ruta: {
     text: "Usaste los minutos de clase incluidos en esta ruta. Con Aulia Pro tienes 120 minutos al mes de clases en vivo, con todos tus profesores.",
-    cta: { href: "/app/planes", label: "Conocer Aulia Pro" },
+    cta: { href: "/app/planes?source=planes_clases", label: "Conocer Aulia Pro" },
   },
   avance: {
     text: "Tu clase completa se desbloquea al 40% de avance — así llegas con preguntas reales y la clase vale oro. Con Aulia Pro tienes 120 minutos al mes de clases en vivo, con todos tus profesores.",
-    cta: { href: "/app/planes", label: "Conocer Aulia Pro" },
+    cta: { href: "/app/planes?source=planes_clases", label: "Conocer Aulia Pro" },
   },
   cupo_pro: {
     text: "Usaste tus minutos Pro de este mes — se renuevan con tu próximo ciclo. Tu profesor te espera.",
@@ -185,6 +187,26 @@ export default async function PathPage({
 
   const totalLessons = path.modules.reduce((n, m) => n + m.lessons.length, 0);
   const claseError = sp.clase_error ? CLASS_ERRORS[sp.clase_error] : undefined;
+
+  // Upsell post-clase (solo al volver de una clase recién terminada): el pico
+  // de deseo del producto exacto que Pro vende (minutos). routeLeft null = no aplica.
+  let postClassRouteLeft: number | null = null;
+  if (sp.clase === "finalizada") {
+    const { isPro } = await getEntitlement(user.id);
+    if (!isPro) {
+      const [used] = await db
+        .select({
+          sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
+        })
+        .from(liveSessions)
+        .where(and(eq(liveSessions.userId, user.id), eq(liveSessions.pathId, pathId)));
+      const left = Math.max(
+        0,
+        env.CLASS_MINUTES_PER_ROUTE - Math.ceil(Number(used?.sec ?? 0) / 60),
+      );
+      if (left <= 10) postClassRouteLeft = left;
+    }
+  }
   // Presupuesto de gestos: la nota "te falta 1" aparece en UN solo módulo
   // (el primero a punto de cerrarse), aunque varios estén a una lección.
   const nudgeModuleId = path.modules.find(
@@ -252,11 +274,30 @@ export default async function PathPage({
         </NotaBanner>
       )}
 
-      {/* Post-clase: el resumen viene en camino. */}
+      {/* Post-clase: el resumen viene en camino. El pico de deseo del producto
+          exacto que Pro vende (minutos de clase) es AHORA — si el básico va
+          quedando sin cupo, el upsell vive aquí, no en un rebote futuro. */}
       {sp.clase === "finalizada" && (
         <NotaBanner tone="exito" titulo="¡Buena clase!" className="mt-6">
-          Tu profesor está preparando el resumen y tus tareas — te llegarán por
-          correo en unos minutos y aparecerán aquí mismo.
+          <p>
+            Tu profesor está preparando el resumen y tus tareas — te llegarán
+            por correo en unos minutos y aparecerán aquí mismo.
+          </p>
+          {postClassRouteLeft !== null && (
+            <>
+              <p className="mt-2">
+                Te{" "}
+                {postClassRouteLeft === 1
+                  ? "queda 1 minuto"
+                  : `quedan ${postClassRouteLeft} minutos`}{" "}
+                de clase en esta ruta. Con Pro: 120 minutos al mes, con todos
+                tus profesores — y esta conversación continúa donde quedó.
+              </p>
+              <Button asChild variant="outline" size="sm" className="mt-3">
+                <Link href="/app/planes?source=post_clase">Conocer Aulia Pro</Link>
+              </Button>
+            </>
+          )}
         </NotaBanner>
       )}
 

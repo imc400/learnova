@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   pgEnum,
@@ -11,6 +12,7 @@ import {
   real,
   uniqueIndex,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 /*
@@ -85,6 +87,10 @@ export const emailType = pgEnum("email_type", [
   "reengagement",
   "class_summary",
   "class_reminder",
+  // Ciclo de vida de ingresos (gateados por LIFECYCLE_EMAILS_ENABLED):
+  // aviso de renovación Pro D-3/D0 y recuperación de carro T+1h/T+24h.
+  "pro_expiring",
+  "cart_recovery",
 ]);
 export const liveSessionStatus = pgEnum("live_session_status", [
   "scheduled",
@@ -162,6 +168,22 @@ export const routeIntents = pgTable(
     amountClp: integer("amount_clp"),
     paidAt: timestamp("paid_at", { withTimezone: true }),
     sourcePathId: uuid("source_path_id"), // métrica "Siguiente paso"
+    // Tema normalizado por el topicCheck del wizard (sin typos/acentos, slug
+    // corto). Es el eje del cacheKey canónico: sin él, "Fotografía" y
+    // "fotografia" generan dos canones distintos y pagan Opus dos veces.
+    canonicalTopic: text("canonical_topic"),
+    // Arquetipo de meta (hobby|trabajo|emprender…): NO faceta la key del caché
+    // (decisión fundador: esqueleto goal-neutral + overlay), pero habilita
+    // analítica de conversión y el cambio a facetado sería 1 línea después.
+    goalArchetype: text("goal_archetype"),
+    // Respuestas crudas del wizard (hoy se aplanan en 2 strings y se pierde
+    // toda señal discreta: re-facetar caché, analítica, brief del profesor).
+    wizardAnswers: jsonb("wizard_answers"),
+    // Fecha/evento objetivo del estudiante. La columna existe para el plan de
+    // ritmo per-usuario, pero NO se pregunta en el wizard (decisión fundador).
+    deadline: text("deadline"),
+    // Atribución del funnel de continuación: card | email | clase_cierre.
+    clickedVia: text("clicked_via"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -211,6 +233,23 @@ export const lessonContentCache = pgTable(
     // re-consultan los metadatos frescos vía videos.list (1 unidad/50) — así la
     // videoGuide SIEMPRE corresponde al video mostrado y cumplimos los 30 días.
     videoIds: jsonb("video_ids").$type<string[]>(),
+    // --- Salud del canon (gate de calidad A-P0.1) ---
+    // El canon se sirve a N ventas futuras: si se cacheó degradado (sin quiz,
+    // sin digest, video rechazado) hay que poder detectarlo y repararlo sin
+    // adivinar. Estas columnas son el diagnóstico; el gate decide con ellas.
+    // Video al que la videoGuide/quiz están ancladas. Si en un HIT el video
+    // vivo difiere de este id, la guía NO corresponde → re-anclar, no copiar.
+    anchoredVideoId: text("anchored_video_id"),
+    // Query de búsqueda que produjo el video ancla (insumo de reanchorLesson
+    // y del backfill: re-curar sin re-generar toda la lección).
+    videoQuery: text("video_query"),
+    hadDigest: boolean("had_digest"), // ¿hubo digest de Gemini al generar?
+    coverage: real("coverage"), // score del coverage gate del video ancla
+    videoCount: integer("video_count"), // candidatos verificados al cachear
+    quizOk: boolean("quiz_ok"), // ¿el quiz se generó y validó?
+    // false = lección canónica SIN video verificado (gate rechazó o cuota):
+    // honesto en BD para que el HIT no "promueva" un video jamás verificado.
+    anchored: boolean("anchored").default(true).notNull(),
     timesReused: integer("times_reused").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -267,6 +306,10 @@ export const learningPaths = pgTable(
     skeletonCacheKey: text("skeleton_cache_key"), // de qué esqueleto derivó
     estimatedHours: real("estimated_hours"),
     isTemplate: boolean("is_template").default(false).notNull(),
+    // Overlay de personalización (decisión fundador, Opción A): el esqueleto y
+    // las lecciones son canónicos goal-neutral; lo "hecho para ti" vive AQUÍ.
+    // 2-3 frases (modelo barato) conectando la meta del estudiante con la ruta.
+    routeIntro: text("route_intro"),
     // Métrica norte del "Siguiente paso": de qué ruta completada nació esta.
     sourcePathId: uuid("source_path_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -293,6 +336,13 @@ export const modules = pgTable(
     // 'plan' = del esqueleto original; 'teacher' = agregado por el profesor IA
     // post-clase en base al feedback del alumno (la ruta se moldea).
     source: text("source").default("plan").notNull(),
+    // Overlay por módulo (par de learning_paths.route_intro): nota personal de
+    // 1 frase «Para tu meta: …». NUNCA va al caché canónico.
+    personalNote: text("personal_note"),
+    // Sesión de clase que originó el módulo (source='teacher'): dedupe
+    // determinístico de extend-path — reintentos at-least-once de Trigger.dev
+    // no deben duplicar el módulo propuesto en vivo.
+    sourceSessionId: text("source_session_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -314,6 +364,10 @@ export const lessons = pgTable(
     content: jsonb("content"), // bloques estructurados de la lección
     notes: text("notes"),
     estimatedMinutes: integer("estimated_minutes"),
+    // Summary del stub del esqueleto (qué sabrá HACER el estudiante). Hoy se
+    // descarta tras insertar; reanchorLesson lo necesita para re-curar video
+    // sin re-generar la lección (sin él usa el título, mucho más pobre).
+    stubSummary: text("stub_summary"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => ({
@@ -846,8 +900,132 @@ export const pathPurchases = pgTable("path_purchases", {
   amount: real("amount").notNull(),
   currency: text("currency").default("USD").notNull(),
   status: paymentStatus("status").default("pending").notNull(),
+  // Atribución de la compra (paywall_intent | planes_limite | planes_clases |
+  // dashboard_banner | perfil_renovacion | profesores_upsell | post_clase |
+  // quiz_trabado): sin esto no se puede optimizar ningún CTA de Pro.
+  source: text("source"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+// ---------- Ops y observabilidad (migración fundacional IA) ----------
+
+// Ledger de uso de la API de Anthropic (res.usage por llamada). Responde las
+// preguntas de negocio que hoy son fe: costo real por ruta fresca vs cacheada,
+// % de cache-hit de prompts (>0 por primera vez) y el insumo del kill-switch
+// de costo diario (AI_DISABLED).
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    label: text("label").notNull(), // etapa: planner | lesson | quiz | ranker | wizard | overlay…
+    // Nullable: el wizard y las llamadas del funnel ocurren antes de que
+    // exista una ruta. set null para no perder el costo si se borra la ruta.
+    pathId: uuid("path_id").references(() => learningPaths.id, {
+      onDelete: "set null",
+    }),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").default(0).notNull(),
+    outputTokens: integer("output_tokens").default(0).notNull(),
+    cacheRead: integer("cache_read").default(0).notNull(), // cache_read_input_tokens
+    cacheWrite: integer("cache_write").default(0).notNull(), // cache_creation_input_tokens
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    createdIdx: index("ai_usage_created_idx").on(t.createdAt), // costo del día (admin)
+    pathIdx: index("ai_usage_path_idx").on(t.pathId), // costo por ruta p50-p95
+  }),
+);
+
+// Incidentes operativos (alertFounder los inserta además de correo/WhatsApp):
+// banner rojo en admin + historial. El UNIQUE por hora es el dedupe — una
+// ráfaga del mismo fallo no spamea al fundador ni llena la tabla.
+export const opsIncidents = pgTable(
+  "ops_incidents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    severity: text("severity").default("critical").notNull(), // critical | warning
+    title: text("title").notNull(),
+    detail: text("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => ({
+    // date_trunc sobre timestamptz no es IMMUTABLE (depende de la TZ de la
+    // sesión); anclamos a UTC para que Postgres acepte la expresión en el
+    // índice y el bucket horario sea estable.
+    uniqTitleHour: uniqueIndex("ops_incidents_title_hour_idx").on(
+      t.title,
+      sql`date_trunc('hour', ${t.createdAt} at time zone 'utc')`,
+    ),
+    openIdx: index("ops_incidents_open_idx").on(t.resolvedAt, t.createdAt),
+  }),
+);
+
+// Cuota diaria de APIs externas (YouTube: 100 u./search, 1 u./details).
+// Con 10K unidades/día el techo es ~4 rutas frescas: el contador alimenta el
+// circuit-breaker (umbral 8.500 → encolar backfill, no buscar), la alerta al
+// 80% y la evidencia para pedir aumento de cuota a Google.
+export const quotaUsage = pgTable("quota_usage", {
+  day: date("day").primaryKey(),
+  youtubeUnits: integer("youtube_units").default(0).notNull(),
+  // Conteo de requests a Gemini (digests): distinción 429 vs 400 (E-P2).
+  geminiRequests: integer("gemini_requests").default(0).notNull(),
+});
+
+// Rate limiting de ventana fija en Postgres (sin Redis): una sola query
+// INSERT … ON CONFLICT … count = count + 1 RETURNING. Consumidores: funnel
+// público (wizard/cuentas por IP) y /api/tutor.
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: text("key").notNull(), // p.ej. "wizard:ip:1.2.3.4"
+    window: timestamp("window", { withTimezone: true }).notNull(), // inicio de la ventana
+    count: integer("count").default(0).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.key, t.window] }),
+  }),
+);
+
+// Caché de preguntas del wizard público por (canonicalTopic, level, language):
+// el paso 1→2 se vuelve instantáneo en temas calientes (mejor conversión) y
+// un bot deja de facturar Haiku ilimitado.
+export const wizardQuestionsCache = pgTable(
+  "wizard_questions_cache",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    cacheKey: text("cache_key").notNull(),
+    questions: jsonb("questions").notNull(), // wizardSchema completo (incl. topicCheck)
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => ({
+    cacheKeyUniq: uniqueIndex("wizard_questions_cache_key_idx").on(t.cacheKey),
+  }),
+);
+
+// Cola de re-curación de video: cuando la cuota YouTube se agota o un rank 0
+// muere (link-rot 2-strike), la lección entra aquí y el cron diario
+// backfill-videos la drena vía reanchorLesson — en vez de cachear canon
+// degradado o servir un video muerto.
+export const videoBackfillQueue = pgTable(
+  "video_backfill_queue",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    lessonId: uuid("lesson_id")
+      .references(() => lessons.id, { onDelete: "cascade" })
+      .notNull(),
+    reason: text("reason").notNull(), // quota_exceeded | link_rot | gate_rechazado
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (t) => ({
+    // El drain busca WHERE processed_at IS NULL ORDER BY created_at.
+    pendingIdx: index("video_backfill_queue_pending_idx").on(
+      t.processedAt,
+      t.createdAt,
+    ),
+  }),
+);
 
 // ---------- Tipos inferidos para usar en la app ----------
 export type Profile = typeof profiles.$inferSelect;
@@ -862,3 +1040,6 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type XpEvent = typeof xpEvents.$inferSelect;
 export type Achievement = typeof achievements.$inferSelect;
 export type UserAchievement = typeof userAchievements.$inferSelect;
+export type AiUsage = typeof aiUsage.$inferSelect;
+export type OpsIncident = typeof opsIncidents.$inferSelect;
+export type VideoBackfillItem = typeof videoBackfillQueue.$inferSelect;

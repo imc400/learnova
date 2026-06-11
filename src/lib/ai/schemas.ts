@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-/** Respuestas del cuestionario inicial (intake). */
+/** Respuestas del cuestionario inicial (intake).
+ *  OJO seguridad: este schema parsea input del CLIENTE (funnel/wizard). Lo
+ *  que decide el cacheKey canónico (canonical_topic, variant) NO vive aquí —
+ *  se lee server-side desde route_intents (lo persiste el wizard, Track B);
+ *  si viniera en el intake un cliente podría envenenar el canon compartido. */
 export const intakeSchema = z.object({
   topic: z.string().min(2),
   goal: z.string().min(3),
@@ -14,38 +18,59 @@ export type Intake = z.infer<typeof intakeSchema>;
 /** Esqueleto de la ruta (lo genera Opus). */
 export const lessonStubSchema = z.object({
   title: z.string(),
-  summary: z.string(),
-  estimatedMinutes: z.number().int(),
+  // El campo más load-bearing del pipeline: guía la query de video, el
+  // coverage gate de Gemini Y el contenido de la lección (A-P1.5c).
+  summary: z
+    .string()
+    .describe(
+      "2-3 frases concretas: qué sabrá HACER el estudiante al terminar; menciona el medio/herramienta de la ruta — este texto guía la curación del video de apoyo y el coverage gate",
+    ),
+  estimatedMinutes: z.number().int().min(5).max(15),
 });
 
 export const moduleStubSchema = z.object({
   title: z.string(),
   objective: z.string(),
   description: z.string(),
+  // Andamiaje declarado (A-P1.5b): alimenta el contexto acumulado entre
+  // lecciones. Nullable: esqueletos cacheados pre-cambio no lo traen.
+  buildsOn: z
+    .string()
+    .nullable()
+    .describe(
+      "qué habilidad o concepto del módulo ANTERIOR usa y extiende este módulo (null solo en el primer módulo)",
+    ),
   lessons: z.array(lessonStubSchema),
 });
 
 export const pathSkeletonSchema = z.object({
   title: z.string(),
   summary: z.string(),
+  // Arco del curso (A-P1.5b): se inyecta en el contexto de cada lección para
+  // que las 24 lecciones cuenten UNA historia. Nullable por esqueletos viejos.
+  narrativeThread: z
+    .string()
+    .nullable()
+    .describe(
+      "el arco del curso en 1-2 frases: de dónde parte el estudiante, por dónde pasa y qué es capaz de hacer al final",
+    ),
   level: z.enum(["principiante", "intermedio", "avanzado"]),
   estimatedHours: z.number(),
-  modules: z.array(moduleStubSchema),
+  // 5-7 módulos (A-P1.5d): el SDK valida client-side → violación = error
+  // detectable en vez de ruta deforme silenciosa.
+  modules: z.array(moduleStubSchema).min(5).max(7),
 });
 export type PathSkeleton = z.infer<typeof pathSkeletonSchema>;
 
-/** Contenido de una lección (lo genera Sonnet). */
+/** Contenido de una lección (lo genera Sonnet).
+ *  Nota A-P2: se eliminó `videoSearchQuery` — era vestigial (el video se
+ *  elige ANTES de escribir la lección, desde los stubs; nadie leía el campo
+ *  y el prompt le dedicaba su bloque más largo). */
 export const lessonContentSchema = z.object({
   intro: z.string(),
   sections: z.array(z.object({ heading: z.string(), body: z.string() })),
   keyTakeaways: z.array(z.string()),
   practice: z.string(),
-  /** Query óptima para buscar el video de apoyo en YouTube. */
-  videoSearchQuery: z
-    .string()
-    .describe(
-      "Búsqueda de YouTube CORTA (3-6 palabras) en el idioma del estudiante, sin jerga en inglés ni signos de puntuación, optimizada para encontrar un buen tutorial en ese idioma.",
-    ),
   /** Guía del video (solo cuando se proveyó digest del video; si no, null). */
   videoGuide: z
     .union([
@@ -68,11 +93,14 @@ export const lessonContentSchema = z.object({
 });
 export type LessonContent = z.infer<typeof lessonContentSchema>;
 
-/** Cuestionario (lo genera Sonnet). */
+/** Cuestionario (lo genera Sonnet).
+ *  A-P2: 'open' fuera del enum — con structured outputs es imposible por
+ *  construcción (antes el prompt lo prohibía por súplica). El caller además
+ *  post-valida que correctOptionIds ⊆ options[].id y no esté vacío. */
 export const quizSchema = z.object({
   questions: z.array(
     z.object({
-      type: z.enum(["single", "multiple", "open"]),
+      type: z.enum(["single", "multiple"]),
       prompt: z.string(),
       options: z.array(z.object({ id: z.string(), text: z.string() })),
       correctOptionIds: z.array(z.string()),
@@ -117,6 +145,25 @@ export const videoRankingSchema = z.object({
   ),
 });
 export type VideoRanking = z.infer<typeof videoRankingSchema>;
+
+/** Overlay de personalización por ruta (A-P0.3, Opción A del fundador):
+ *  se guarda en learning_paths.route_intro + modules.personal_note —
+ *  NUNCA en lesson_content_cache ni skeleton_cache. */
+export const routeOverlaySchema = z.object({
+  routeIntro: z
+    .string()
+    .describe("2-3 frases conectando la meta y experiencia del estudiante con el recorrido de la ruta"),
+  moduleNotes: z.array(
+    z.object({
+      moduleIndex: z
+        .number()
+        .int()
+        .describe("índice 0-based del módulo en el temario recibido"),
+      note: z.string().describe("1 frase: «Para tu meta: …»"),
+    }),
+  ),
+});
+export type RouteOverlay = z.infer<typeof routeOverlaySchema>;
 
 /** Contenido de un correo de avance (lo genera Haiku, anclado a datos reales). */
 export const emailContentSchema = z.object({

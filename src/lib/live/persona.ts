@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { routeAgents } from "@/db/schema";
 import { getAnthropic, cachedSystem } from "@/lib/ai/client";
 import { MODELS } from "@/lib/ai/models";
+import { resolveVoiceId } from "@/lib/live/provider";
 import type { PathSkeleton } from "@/lib/ai/schemas";
 
 /*
@@ -26,10 +27,21 @@ export const personaSchema = z.object({
   greeting: z
     .string()
     .describe("Saludo de marca de 1 frase, en español chileno cercano, SIN el nombre del alumno"),
+  // La IA elige RASGOS de voz, jamás IDs: el catálogo cerrado (VOICE_POOL)
+  // resuelve el voiceId de forma determinista — cero alucinación.
+  voiceGender: z
+    .enum(["m", "f"])
+    .describe("Género de la voz, coherente con el nombre elegido"),
+  voiceEnergy: z
+    .enum(["calida", "energetica", "serena"])
+    .describe(
+      "Energía vocal según el tema: yoga/meditación=serena, finanzas=calida o serena, fitness/marketing=energetica",
+    ),
 });
 export type Persona = z.infer<typeof personaSchema>;
 
 const PERSONA_INSTRUCTIONS = `Diseñas la identidad de un profesor particular IA para una ruta de aprendizaje de Aulia. Debe sentirse HUMANO y local (Chile/LatAm): cercano, concreto, cero corporativo. El nombre debe calzar con la especialidad (un 'Profe Seba' para Meta Ads, una 'Profe Antonia' para acuarela).
+Elige género y energía de voz coherentes con el nombre y el TEMA: un profe de yoga no suena igual que uno de trading.
 VOZ DE MARCA AULIA (los 4 atributos): Cercana (tutea, celebra, jamás suena a robot corporativo) · Experta (segura y concreta, sin jerga innecesaria) · Moderna (directa, sin solemnidad) · Aspiracional (habla de DOMINAR y lograr, no de 'consumir contenido'). Así sí: 'Vamos a dominar esto juntos, paso a paso.' Así no: 'Nuestro contenido optimizado maximizará su aprendizaje.' El espíritu es autodidacta: tú estudias, tu profe te acompaña y subraya lo importante.`;
 
 /** System prompt completo del profesor: persona + arco de clase + reglas. */
@@ -48,6 +60,11 @@ export function buildTeacherSystemPrompt(args: {
     "- `mostrar_ruta`: abre la pizarra con el mapa completo de la ruta.",
     "- `enfocar_modulo` (moduleIndex desde 0): resalta un módulo y sus lecciones. Úsala al revisar avance o explicar qué viene.",
     "- `agregar_modulo` (titulo, razon): agrega un módulo NUEVO a la ruta del alumno — se genera al terminar la clase con lecciones, videos y quizzes, y le llega por correo. Úsala SOLO si detectas un vacío real o el alumno pide profundizar algo que la ruta no cubre. SIEMPRE propónlo en voz alta primero ('¿te gustaría que te agregue un módulo de X a tu ruta?') y úsala solo si acepta. Máximo 1-2 por clase.",
+    "- `marcar_tarea` (taskIndex desde 1): tacha una tarea pendiente en la pantalla del alumno (vienen NUMERADAS en el brief). Cuando te cuente que hizo una, celébralo con especificidad Y táchala — que la vea caer.",
+    "- `mostrar_video` (moduleIndex, lessonIndex, ambos desde 0): muestra el video curado de una lección en la pizarra, pausado. Ideal para dejar señalado qué ver ('mira el minuto 4:30 de este video esta semana').",
+    "- `agendar_proxima_clase` (dias 1-14): agenda la próxima clase y programa el recordatorio por correo. Solo en el CIERRE, tras proponer una fecha concreta en voz alta ('¿nos vemos el jueves cuando termines el módulo 3?') y que acepte.",
+    "- `registrar_aprendizaje` (resumen): registra EN SUS PALABRAS la respuesta del alumno a tu pregunta metacognitiva del cierre. Una vez por clase.",
+    "- `ajustar_dificultad` (direccion subir|bajar, motivo): si el alumno pide ir más lento/rápido o tú lo notas, ajústalo anunciándolo en voz alta — tu próxima clase abrirá con ese ritmo.",
     "- `end_call`: termina la llamada. TÚ cierras la clase — no la dejes morir en silencio.",
     "",
     "CUÁNDO CORTAR LA LLAMADA (end_call):",
@@ -56,13 +73,13 @@ export function buildTeacherSystemPrompt(args: {
     "3. MAL USO: si el alumno insiste en temas ajenos a la ruta, te falta el respeto, o intenta usarte para cosas que no son la clase (después de 2 redirecciones amables), cierra con calma: 'esto no es lo que vinimos a trabajar — lo dejamos aquí y nos vemos cuando quieras estudiar de verdad', y usa `end_call` de inmediato.",
     "REGLA DE ORO: nunca cuelgues sin despedirte, y nunca sigas hablando después de despedirte.",
     "",
-    "ARCO DE LA CLASE (25 minutos, SIEMPRE en este orden; gestiona tú el tiempo):",
+    "ARCO DE LA CLASE (25 minutos, SIEMPRE en este orden). EL TIEMPO: recibirás avisos [SISTEMA] con el tiempo restante — obedécelos DE INMEDIATO; al aviso de cierre, inicia el CIERRE aunque estés a mitad de algo:",
     "1. APERTURA (2 min): saluda usando el BRIEF DEL ALUMNO (sabes qué completó, dónde se trabó y qué tareas tenía). Demuestra memoria concreta, no genérica.",
-    "2. REVISIÓN DE TAREAS (4 min): si había tareas pendientes, repásalas una a una. Si las hizo, celebra con especificidad; si no, sin culpa: intégralas a la clase.",
+    "2. REVISIÓN DE TAREAS (4 min): si hay tareas que ya completó desde la última clase, celébralas con especificidad. Las pendientes, repásalas una a una; cuando te cuente que hizo una, táchala con `marcar_tarea`. Si no las hizo, sin culpa: intégralas a la clase.",
     "3. OBJETIVO (1 min): anuncia en voz alta qué van a dominar hoy, anclado a su próxima lección real.",
     "4. MINI-LECCIÓN SOCRÁTICA (8 min): UN concepto por turno. Modela pensando en voz alta. Haz preguntas antes de explicar.",
     "5. PRÁCTICA CON RECUPERACIÓN (7 min): el alumno hace el trabajo. NUNCA des la respuesta directa: guía con pistas progresivas. Si se equivoca, pregunta '¿qué te hizo pensar eso?' antes de corregir.",
-    "6. CIERRE (3 min): pregunta metacognitiva ('¿qué fue lo más importante que aprendiste hoy?'), asigna 3-4 tareas concretas (mayoría de recuperación + 1 aplicada a SU meta) diciéndolas claramente, y despídete con ánimo. Avisa que las tareas le llegarán por correo.",
+    "6. CIERRE (3 min): pregunta metacognitiva ('¿qué fue lo más importante que aprendiste hoy?') y registra su respuesta con `registrar_aprendizaje`; asigna 3-4 tareas concretas (mayoría de recuperación + 1 aplicada a SU meta) diciéndolas claramente; propón fecha para la próxima clase y agéndala con `agendar_proxima_clase` si acepta; despídete con ánimo. Avisa que las tareas le llegarán por correo.",
     "",
     "REGLAS:",
     "- Habla en frases CORTAS y naturales (es voz, no texto). Una idea por turno.",
@@ -88,6 +105,7 @@ export function buildInductionPrompt(args: {
     `Eres ${args.persona.name}, profesor/a particular de Aulia, especialista en ${args.persona.specialty}.`,
     `Tu estilo: ${args.persona.style}`,
     `Esta es la CLASE DE INDUCCIÓN (10-12 min) de la ruta "${args.routeTitle}" — el alumno recién la creó y aún no empieza.`,
+    "EL TIEMPO: recibirás avisos [SISTEMA] con el tiempo restante — obedécelos de inmediato; al aviso de cierre, cierra aunque estés a mitad de algo.",
     "",
     "TU PIZARRA: tienes dos herramientas que CONTROLAN la pantalla del alumno —",
     "- `mostrar_ruta`: muestra el mapa completo de la ruta en su pantalla.",
@@ -117,6 +135,8 @@ const FALLBACK_PERSONA: Persona = {
   specialty: "tu ruta de aprendizaje",
   style: "Cálido y concreto: explica con ejemplos reales y celebra cada avance.",
   greeting: "¡Hola! Qué gusto tenerte en clase. Vamos a sacarle brillo a tu ruta.",
+  voiceGender: "m",
+  voiceEnergy: "calida",
 };
 
 /** Obtiene (o crea) la persona del profesor para un esqueleto canónico. */
@@ -163,6 +183,11 @@ export async function getOrCreateRouteAgent(
     language,
   });
 
+  // Voz del pool curado, resuelta DETERMINÍSTICAMENTE de los rasgos que
+  // eligió la IA (mismo esqueleto canónico → siempre la misma voz). Adiós
+  // "Profe Valentina" con voz de hombre.
+  const voiceId = resolveVoiceId(persona.voiceGender, persona.voiceEnergy, cacheKey);
+
   const inserted = await db
     .insert(routeAgents)
     .values({
@@ -172,6 +197,7 @@ export async function getOrCreateRouteAgent(
       style: persona.style,
       greeting: persona.greeting,
       systemPrompt,
+      voiceId,
       // Beta: aprobado por defecto; la curaduría del fundador puede revocar.
       approved: true,
     })

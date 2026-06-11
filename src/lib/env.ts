@@ -84,6 +84,35 @@ const serverSchema = z.object({
   PRICE_CLASS_CLP: z.coerce.number().int().positive().default(6990),
   // Acceso al dashboard admin además de profiles.is_admin (coma-separado).
   ADMIN_EMAILS: z.string().default(""),
+
+  // --- Correos de ciclo de vida (renovación Pro D-3/D0 + carros T+1h/T+24h) ---
+  // Los crons SIEMPRE corren, pero con "false" NO encolan nada (log claro en
+  // su lugar): el fundador aprueba los copys y enciende sin deploy.
+  LIFECYCLE_EMAILS_ENABLED: z.string().default("false"),
+
+  // --- Ops y observabilidad (Track E) ---
+  // Kill-switch global de generación IA: "true" apaga las llamadas a Anthropic
+  // sin deploy (p.ej. costo diario fuera de umbral según ai_usage). La
+  // reconciliación y los correos deterministas NO dependen de esto.
+  AI_DISABLED: z.string().default("false"),
+  // Secret del doble disparador de reconciliación (vercel.json → cron HTTP a
+  // /api/admin/reconcile): si Trigger.dev está caído, su cron también — este
+  // camino alterno necesita autenticarse. Vacío = endpoint deshabilitado.
+  CRON_SECRET: z.string().default(""),
+  // WhatsApp del fundador vía CallMeBot (solo incidentes 'critical' de
+  // alertFounder). Vacíos = solo correo + ops_incidents (degradación suave).
+  CALLMEBOT_PHONE: z.string().default(""),
+  CALLMEBOT_APIKEY: z.string().default(""),
+  // Cuota diaria de YouTube Data API (10K por defecto en Google) y umbral del
+  // circuit-breaker: sobre el umbral NO se busca — la lección se encola en
+  // video_backfill_queue y NO se cachea canon degradado. Alerta al 80%.
+  YOUTUBE_QUOTA_DAILY_LIMIT: z.coerce.number().int().positive().default(10000),
+  YOUTUBE_QUOTA_SOFT_LIMIT: z.coerce.number().int().positive().default(8500),
+
+  // --- Profesor IA (Track C) ---
+  // HMAC del workspace para el conversation-initiation webhook de ElevenLabs
+  // (/api/live/initiation): el system prompt deja de viajar al navegador.
+  ELEVENLABS_WEBHOOK_SECRET: z.string().min(1).optional(),
 });
 
 const clientSchema = z.object({

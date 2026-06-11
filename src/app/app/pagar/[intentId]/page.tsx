@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   Sparkles,
   CheckCircle2,
@@ -38,7 +37,7 @@ export default async function PagarPage({
   searchParams,
 }: {
   params: Promise<{ intentId: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; plan?: string }>;
 }) {
   const { intentId } = await params;
   const sp = await searchParams;
@@ -69,12 +68,34 @@ export default async function PagarPage({
   // no se pisan y el costo queda acotado (solo el dueño autenticado llega).
   let preview = intent.preview;
   if (!preview?.modules?.length) {
-    const cacheKey = `${intent.topic.toLowerCase().trim()}-${intent.level}-${intent.language}`;
-    const [canon] = await db
-      .select({ skeleton: skeletonCache.skeleton })
+    // Candidatas de key, de la más específica a la legacy: canónica+variant
+    // (formato final de Track A), canónica a secas, y la derivación cruda
+    // histórica (con la que se escribió el canon pre-existente, p.ej. el de
+    // la demo pre-calentada). La primera que exista en skeleton_cache gana.
+    const wa = intent.wizardAnswers as { variant?: string | null } | null;
+    const variant = typeof wa?.variant === "string" && wa.variant ? wa.variant : null;
+    const suffix = `${intent.level}-${intent.language}`;
+    const keyCandidates = [
+      ...(intent.canonicalTopic && variant
+        ? [`${intent.canonicalTopic}-${variant}-${suffix}`]
+        : []),
+      ...(intent.canonicalTopic ? [`${intent.canonicalTopic}-${suffix}`] : []),
+      `${intent.topic.toLowerCase().trim()}-${suffix}`,
+    ];
+    // TODO(Track A): cuando prompts.ts exporte PROMPT_VERSION, reemplazar el
+    // `1` hardcodeado para que el paywall siga leyendo el canon vigente.
+    const canonRows = await db
+      .select({ cacheKey: skeletonCache.cacheKey, skeleton: skeletonCache.skeleton })
       .from(skeletonCache)
-      .where(and(eq(skeletonCache.cacheKey, cacheKey), eq(skeletonCache.version, 1)))
-      .limit(1);
+      .where(
+        and(
+          inArray(skeletonCache.cacheKey, keyCandidates),
+          eq(skeletonCache.version, 1),
+        ),
+      );
+    const canon = keyCandidates
+      .map((k) => canonRows.find((r) => r.cacheKey === k))
+      .find(Boolean);
     const canonModules = (
       canon?.skeleton as { modules?: Array<{ title?: string }> } | undefined
     )?.modules
@@ -88,6 +109,7 @@ export default async function PagarPage({
         level: intent.level,
         goal: intent.goal,
         language: intent.language,
+        priorExperience: intent.priorExperience,
       }).catch(() => null),
       new Promise<null>((r) => setTimeout(() => r(null), 4500)),
     ]);
@@ -113,6 +135,9 @@ export default async function PagarPage({
   // PAT activo → suscripción real con cobro automático. Sin PAT → Pro MANUAL:
   // cobro único de 30 días, sin renovación automática (se avisa para renovar).
   const proAutomatico = env.PRO_SUBSCRIPTION_ENABLED === "true";
+  // Venía de la landing con Pro elegido → su card llega destacada (no se le
+  // hace elegir "a ciegas" dos veces; el clic de pago sigue siendo suyo).
+  const eligioPro = sp.plan === "pro";
   const firstName =
     (user.user_metadata?.full_name as string | undefined)?.split(" ")[0] ?? null;
 
@@ -255,9 +280,15 @@ export default async function PagarPage({
           </form>
         </div>
 
-        {/* Pro — recomendado */}
-        <div className="relative flex flex-col rounded-2xl border-2 border-primary bg-card p-5 shadow-lift">
-          <span className="tab-note absolute -top-4 left-4">recomendado ✺</span>
+        {/* Pro — recomendado (o "tu elección" si vino de la landing con Pro) */}
+        <div
+          className={`relative flex flex-col rounded-2xl border-2 border-primary bg-card p-5 shadow-lift ${
+            eligioPro ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""
+          }`}
+        >
+          <span className="tab-note absolute -top-4 left-4">
+            {eligioPro ? "tu elección ✺" : "recomendado ✺"}
+          </span>
           <p className="font-display font-semibold">Aulia Pro</p>
           <p className="mt-3 font-display text-3xl font-bold text-primary">
             {formatPrice(pro, "CLP")}
@@ -272,7 +303,9 @@ export default async function PagarPage({
             <li className="flex items-start gap-2.5">
               <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" />
               <span>
-                Esta ruta queda <span className="ink-hl">incluida</span> hoy
+                Esta ruta ({formatPrice(amount, "CLP")}) queda{" "}
+                <span className="ink-hl">incluida</span> hoy — todo lo demás del
+                mes te sale {formatPrice(pro - amount, "CLP")}
               </span>
             </li>
             <li className="flex items-start gap-2.5">
@@ -320,11 +353,11 @@ export default async function PagarPage({
         se confirma — y tu profesor te estará esperando.
       </p>
 
+      {/* Sin link de fuga en el momento de decisión: navegar a /app/crear aquí
+          generaba intents duplicados que ensucian la recuperación de carros. */}
       <p className="mt-4 text-center text-xs text-muted-foreground">
-        ¿Otro tema?{" "}
-        <Link href="/app/crear" className="font-medium text-primary hover:underline">
-          Crear otra ruta
-        </Link>
+        ¿Otro tema en mente? Primero activa esta ruta — crear la siguiente toma
+        2 minutos.
       </p>
     </div>
   );

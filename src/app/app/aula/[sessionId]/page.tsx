@@ -2,11 +2,9 @@ import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { liveSessions, learningPaths, routeAgents, modules, lessons } from "@/db/schema";
-import { asc } from "drizzle-orm";
-import { buildClassBrief } from "@/lib/live/brief";
-import { buildInductionPrompt } from "@/lib/live/persona";
-import { getSessionCredentials } from "@/lib/live/provider";
+import { liveSessions, learningPaths } from "@/db/schema";
+import { buildSessionInitiation } from "@/lib/live/initiation";
+import { getSessionCredentials, secureInitiationEnabled } from "@/lib/live/provider";
 import { AulaClient } from "@/components/app/aula-client";
 
 export async function generateMetadata({
@@ -32,8 +30,10 @@ export async function generateMetadata({
 }
 
 /**
- * El aula: valida la sesión, arma el BRIEF del alumno en el servidor (jamás
- * en el cliente) y entrega credenciales efímeras + overrides al widget de voz.
+ * El aula: valida la sesión, arma la iniciación en el servidor y entrega
+ * credenciales efímeras al widget de voz. En modo SEGURO (initiation webhook)
+ * el prompt y el saludo NO viajan al navegador: ElevenLabs los pide
+ * server-to-server a /api/live/initiation. En modo legado van como overrides.
  */
 export default async function AulaPage({
   params,
@@ -47,102 +47,46 @@ export default async function AulaPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
+  // Sesión del usuario (cerrada → de vuelta a la ruta; ajena → 404).
   const [session] = await db
-    .select({
-      id: liveSessions.id,
-      status: liveSessions.status,
-      pathId: liveSessions.pathId,
-      kind: liveSessions.kind,
-    })
+    .select({ id: liveSessions.id, status: liveSessions.status, pathId: liveSessions.pathId })
     .from(liveSessions)
     .where(and(eq(liveSessions.id, sessionId), eq(liveSessions.userId, user.id)))
     .limit(1);
   if (!session) notFound();
   if (session.status !== "in_progress") redirect(`/app/rutas/${session.pathId}`);
 
-  const [path] = await db
-    .select({
-      title: learningPaths.title,
-      language: learningPaths.language,
-      skeletonCacheKey: learningPaths.skeletonCacheKey,
-    })
-    .from(learningPaths)
-    .where(eq(learningPaths.id, session.pathId))
-    .limit(1);
-  if (!path) notFound();
+  const init = await buildSessionInitiation(sessionId, { userId: user.id });
+  if (!init) redirect(`/app/rutas/${session.pathId}`);
+  if (!init.elevenlabsAgentId) redirect(`/app/rutas/${session.pathId}`);
 
-  const cacheKey = path.skeletonCacheKey ?? `path-${session.pathId}`;
-  const [agent] = await db
-    .select()
-    .from(routeAgents)
-    .where(eq(routeAgents.cacheKey, cacheKey))
-    .limit(1);
-  if (!agent?.elevenlabsAgentId) redirect(`/app/rutas/${session.pathId}`);
-
-  // Brief con memoria + credenciales efímeras (server-side, por carga).
-  const brief = await buildClassBrief(user.id, session.pathId, agent.greeting);
-  const { signedUrl } = await getSessionCredentials(agent.elevenlabsAgentId);
-
-  // Outline de la ruta → la PIZARRA que el profesor controla en vivo.
-  const mods = await db
-    .select({
-      id: modules.id,
-      title: modules.title,
-      orderIndex: modules.orderIndex,
-      lessonTitle: lessons.title,
-      lessonIndex: lessons.orderIndex,
-    })
-    .from(modules)
-    .innerJoin(lessons, eq(lessons.moduleId, modules.id))
-    .where(eq(modules.pathId, session.pathId))
-    .orderBy(asc(modules.orderIndex), asc(lessons.orderIndex));
-  const outlineMap = new Map<number, { title: string; lessons: string[] }>();
-  for (const r of mods) {
-    const m = outlineMap.get(r.orderIndex) ?? { title: r.title, lessons: [] };
-    m.lessons.push(r.lessonTitle);
-    outlineMap.set(r.orderIndex, m);
-  }
-  const outline = [...outlineMap.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, m]) => m);
-
-  const isInduction = session.kind === "induction";
-  const fullPrompt = isInduction
-    ? `${buildInductionPrompt({
-        persona: {
-          name: agent.name,
-          specialty: agent.specialty,
-          style: agent.style,
-          greeting: agent.greeting,
-        },
-        routeTitle: path.title,
-        language: path.language,
-      })}\n\n${brief.briefText}`
-    : `${agent.systemPrompt}\n\n${brief.briefText}`;
-  const firstMessage = isInduction
-    ? `¡Hola ${brief.studentFirstName}! Soy ${agent.name}, tu profesor en esta ruta. Te doy la bienvenida. Antes de que empieces, déjame mostrarte qué vamos a aprender juntos y cómo funciona todo esto. ¿Te parece?`
-    : brief.scriptedGreeting;
+  const { signedUrl } = await getSessionCredentials(init.elevenlabsAgentId);
+  const secure = secureInitiationEnabled();
 
   return (
     <div className="mx-auto max-w-2xl">
       {/* El breadcrumb vive en AulaClient: mientras la clase está conectada se
           oculta/intercepta para que un clic accidental no la termine. */}
       <AulaClient
-        sessionId={session.id}
+        sessionId={sessionId}
         signedUrl={signedUrl}
-        prompt={fullPrompt}
-        firstMessage={firstMessage}
-        language={path.language.slice(0, 2) === "en" ? "en" : "es"}
-        teacherName={agent.name}
-        specialty={agent.specialty}
-        pathId={session.pathId}
-        pathTitle={path.title}
-        kind={isInduction ? "induction" : "class"}
-        outline={outline}
+        // Modo seguro: el prompt pedagógico (IP del producto) y el saludo se
+        // quedan en el servidor; ElevenLabs los obtiene vía webhook firmado.
+        secureInitiation={secure}
+        prompt={secure ? "" : init.prompt}
+        firstMessage={secure ? "" : init.firstMessage}
+        language={init.language}
+        teacherName={init.teacherName}
+        specialty={init.specialty}
+        pathId={init.pathId}
+        pathTitle={init.pathTitle}
+        kind={init.kind}
+        outline={init.outline}
+        homework={init.pendingHomework}
       />
 
       <p className="mt-6 text-center text-xs text-muted-foreground">
-        {agent.name} es un profesor de inteligencia artificial. La conversación
+        {init.teacherName} es un profesor de inteligencia artificial. La conversación
         se transcribe para generar tu resumen y tareas; el audio no se almacena.
       </p>
     </div>

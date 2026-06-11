@@ -105,7 +105,9 @@ export function Precios() {
 
               <div className="mt-auto pt-7">
                 <Button asChild variant="outline" className="w-full">
-                  <Link href="/empieza/ruta">Partir con Pro</Link>
+                  {/* plan=pro viaja por el embudo: badge correcto en el paso 3
+                      del wizard y Pro destacado en el paywall. */}
+                  <Link href="/empieza/ruta?plan=pro">Partir con Pro</Link>
                 </Button>
               </div>
             </article>

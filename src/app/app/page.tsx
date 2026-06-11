@@ -13,8 +13,12 @@ import {
   Route,
   type LucideIcon,
 } from "lucide-react";
+import { and, eq, sql } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { pathPurchases, liveSessions } from "@/db/schema";
 import { getEntitlement } from "@/lib/subscription";
+import { formatPrice } from "@/lib/utils";
 import { listUserPaths } from "@/server/queries/paths";
 import { getUserAchievements } from "@/server/queries/gamification";
 import { LearningProgress } from "@/components/app/learning-progress";
@@ -64,6 +68,47 @@ export default async function DashboardPage() {
     ? await Promise.all([listUserPaths(user.id), getUserAchievements(user.id)])
     : [[], []];
   const { isPro } = user ? await getEntitlement(user.id) : { isPro: false };
+
+  // Banner Pro CONDICIONADO a señales (permanente = ceguera de banner):
+  // (a) 2+ rutas compradas sueltas → anclaje matemático honesto con SU gasto real;
+  // (b) ya usó ≥50% del cupo de minutos de una ruta → probó las clases y le gustaron.
+  // Sin señal, sin banner.
+  let proBanner: { copy: string } | null = null;
+  if (user && !isPro && paths.length > 0) {
+    const [[buys], [mins]] = await Promise.all([
+      db
+        .select({
+          n: sql<number>`count(*)::int`,
+          total: sql<number>`coalesce(sum(${pathPurchases.amount}), 0)::int`,
+        })
+        .from(pathPurchases)
+        .where(
+          and(
+            eq(pathPurchases.userId, user.id),
+            eq(pathPurchases.kind, "route"),
+            eq(pathPurchases.status, "paid"),
+          ),
+        ),
+      db
+        .select({
+          sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
+        })
+        .from(liveSessions)
+        .where(eq(liveSessions.userId, user.id)),
+    ]);
+    const paidRoutes = Number(buys?.n ?? 0);
+    const invested = Number(buys?.total ?? 0);
+    const usedMin = Math.ceil(Number(mins?.sec ?? 0) / 60);
+    if (paidRoutes >= 2) {
+      proBanner = {
+        copy: `Ya invertiste ${formatPrice(invested, "CLP")} en ${paidRoutes} rutas — Pro te da ${env.PRO_ROUTES_PER_MONTH} al mes, más 120 minutos de clases en vivo, por ${formatPrice(env.PRICE_PRO_CLP, "CLP")}.`,
+      };
+    } else if (usedMin >= env.CLASS_MINUTES_PER_ROUTE / 2) {
+      proBanner = {
+        copy: `${env.PRO_ROUTES_PER_MONTH} rutas nuevas al mes + 120 minutos al mes de clases en vivo, con todos tus profesores.`,
+      };
+    }
+  }
 
   // "Caminos": cadenas de rutas conectadas por linaje (sourcePathId — la ruta
   // creada desde el "Siguiente paso" de otra). Un camino = raíz + sucesoras.
@@ -121,22 +166,19 @@ export default async function DashboardPage() {
         </Button>
       </div>
 
-      {/* Estímulo Pro: visible para básicos con al menos una ruta (los que
-          ya probaron el producto — el mejor momento para el upgrade). */}
-      {!isPro && paths.length > 0 && (
+      {/* Estímulo Pro condicionado a señales reales (gasto en rutas sueltas o
+          uso de clases) — un banner permanente se vuelve invisible. */}
+      {proBanner && (
         <div className="relative mt-2 flex flex-col items-start justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 sm:flex-row sm:items-center">
           <span className="absolute -top-4 right-5 rotate-[3deg]">
             <span className="tab-note">sin cobro automático ✺</span>
           </span>
           <div>
             <p className="font-display text-sm font-bold">¿Vas en serio? Aulia Pro</p>
-            <p className="text-sm text-muted-foreground">
-              {env.PRO_ROUTES_PER_MONTH} rutas nuevas al mes + 120 minutos al mes
-              de clases en vivo, con todos tus profesores.
-            </p>
+            <p className="text-sm text-muted-foreground">{proBanner.copy}</p>
           </div>
           <Button asChild size="sm" variant="primary">
-            <Link href="/app/planes">Conocer Pro</Link>
+            <Link href="/app/planes?source=dashboard_banner">Conocer Pro</Link>
           </Button>
         </div>
       )}

@@ -103,6 +103,21 @@ export async function confirmIntentPaid(args: {
     console.error(
       `[pagos] ALERTA: monto ${args.provider} ${args.chargedAmountClp} ≠ intent ${result.intent.amountClp} (${args.intentId})`,
     );
+    // Plata mal cobrada NO puede ser solo un log (E-P0.2): correo + WhatsApp
+    // + ops_incidents. La ruta se entrega igual (el cliente no tiene culpa).
+    await alertFounder({
+      severidad: "critical",
+      titulo: "Monto cobrado distinto al intent",
+      detalle:
+        "El proveedor reportó un monto distinto al del intent. La ruta se entregó igual, pero hay que cuadrar la plata (¿precio cambiado a mitad de checkout? ¿cobro parcial?).",
+      contexto: {
+        intentId: args.intentId,
+        proveedor: args.provider,
+        cobradoClp: args.chargedAmountClp,
+        intentClp: result.intent.amountClp,
+        pathId: result.pathId,
+      },
+    });
   }
   await db
     .insert(pathPurchases)

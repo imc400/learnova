@@ -13,7 +13,12 @@ import {
   generateVideoQueries,
 } from "@/lib/ai/generate";
 import { getVideoInsights, type VideoDigest } from "@/lib/video/insights";
-import { curateAndSaveVideo, generateAndSaveQuiz } from "./run";
+import {
+  curateAndSaveVideo,
+  generateAndSaveQuiz,
+  swapVideoRanks,
+  effectiveCoverage,
+} from "./run";
 import { enqueueProgressEmail } from "@/lib/email/enqueue";
 
 /*
@@ -40,8 +45,10 @@ export async function extendPathWithModule(args: {
     .limit(1);
   if (!path) return "ruta no encontrada";
 
-  // Idempotencia (Trigger es at-least-once): si ya existe un módulo teacher
-  // con este título en la ruta, no lo dupliques.
+  // Idempotencia (Trigger es at-least-once). Dedupe DETERMINÍSTICO por
+  // source_session_id (A-P2): si Sonnet renombra el módulo, el match por
+  // título fallaba y cada retry creaba un duplicado. El título queda como
+  // fallback para módulos pre-migración.
   const existing = await db
     .select({
       id: modulesT.id,
@@ -49,14 +56,16 @@ export async function extendPathWithModule(args: {
       objective: modulesT.objective,
       orderIndex: modulesT.orderIndex,
       source: modulesT.source,
+      sourceSessionId: modulesT.sourceSessionId,
     })
     .from(modulesT)
     .where(eq(modulesT.pathId, args.pathId))
     .orderBy(asc(modulesT.orderIndex));
   const dupe = existing.find(
     (m) =>
-      m.source === "teacher" &&
-      m.title.toLowerCase().includes(args.requestedTitle.toLowerCase().slice(0, 30)),
+      (m.source === "teacher" && m.sourceSessionId === args.sessionId) ||
+      (m.source === "teacher" &&
+        m.title.toLowerCase().includes(args.requestedTitle.toLowerCase().slice(0, 30))),
   );
   if (dupe) return `ya existe: ${dupe.title}`;
 
@@ -79,6 +88,7 @@ export async function extendPathWithModule(args: {
     requestedTitle: args.requestedTitle,
     reason: args.reason,
     struggles,
+    tracking: { pathId: args.pathId },
   });
 
   // 2) Estructura primero (visible al instante con spinners por lección).
@@ -92,6 +102,7 @@ export async function extendPathWithModule(args: {
       description: mod.description,
       objective: mod.objective,
       source: "teacher",
+      sourceSessionId: args.sessionId, // dedupe determinístico de reintentos
     })
     .onConflictDoNothing({ target: [modulesT.pathId, modulesT.orderIndex] })
     .returning();
@@ -106,6 +117,7 @@ export async function extendPathWithModule(args: {
         orderIndex: li,
         title: ls.title,
         estimatedMinutes: ls.estimatedMinutes,
+        stubSummary: ls.summary, // reanchorLesson lo necesita (A-P2)
       })
       .onConflictDoNothing({ target: [lessonsT.moduleId, lessonsT.orderIndex] })
       .returning();
@@ -146,6 +158,8 @@ export async function extendPathWithModule(args: {
         summary: ls.summary,
       })),
       language: path.language,
+      level: path.level,
+      tracking: { pathId: args.pathId },
     });
     queryByIndex = new Map(q.queries.map((x) => [x.lessonIndex, x.query]));
   } catch (e) {
@@ -154,10 +168,12 @@ export async function extendPathWithModule(args: {
 
   await Promise.all(
     lessonRows.map(async ({ id: lessonId, ls }, li) => {
+      // El ranker recibe lección + nivel dentro del objetivo (A-P1.7).
+      const rankObjective = `${mod.objective} · LECCIÓN: ${ls.title} — ${ls.summary} · NIVEL DEL ESTUDIANTE: ${path.level}`;
       const vids = await curateAndSaveVideo(
         lessonId,
         queryByIndex.get(li) ?? ls.title,
-        mod.objective,
+        rankObjective,
         path.language,
         path.title,
         usedVideoIds,
@@ -175,19 +191,37 @@ export async function extendPathWithModule(args: {
             durationSeconds: topVideo.durationSeconds ?? null,
           });
           const alt = vids[1];
-          if (ins && ins.digest.coverage < 0.5 && alt) {
+          if (ins && effectiveCoverage(ins.digest, path.level) < 0.5 && alt) {
             const altIns = await getVideoInsights({
               videoId: alt.videoId,
               lessonSummary: coverageSummary,
               language: path.language,
               durationSeconds: alt.durationSeconds ?? null,
             });
-            if (altIns && altIns.digest.coverage > ins.digest.coverage) {
+            if (
+              altIns &&
+              effectiveCoverage(altIns.digest, path.level) >
+                effectiveCoverage(ins.digest, path.level)
+            ) {
               ins = altIns;
               topVideo = alt;
+              // A-P1.6: el ganador del gate se PROMUEVE a rank 0 — antes el
+              // alumno veía el video #1 con la guía y el quiz anclados al #2,
+              // justo en el flujo premium (módulo del profesor post-clase).
+              await swapVideoRanks(lessonId, alt.videoId).catch((e) =>
+                console.error(`[extend] swap de rank falló:`, e),
+              );
             }
           }
-          if (ins && ins.digest.coverage < 0.35) {
+          if (ins && effectiveCoverage(ins.digest, path.level) < 0.35) {
+            // Igual que en run.ts: si ningún candidato cubre la lección, se
+            // desactivan TODOS (no solo el top) — la UI no debe promover un
+            // video jamás verificado.
+            await db
+              .update(videoCandidates)
+              .set({ isActive: false })
+              .where(eq(videoCandidates.lessonId, lessonId))
+              .catch(() => {});
             topVideo = null;
             ins = null;
           }
@@ -206,6 +240,8 @@ export async function extendPathWithModule(args: {
         level: path.level,
         language: path.language,
         videoDigest: digest,
+        videoDurationSeconds: topVideo?.durationSeconds ?? null,
+        tracking: { pathId: args.pathId },
       });
       await db
         .update(lessonsT)
@@ -221,6 +257,7 @@ export async function extendPathWithModule(args: {
         content,
         digest,
         topVideo?.durationSeconds ?? null,
+        { pathId: args.pathId },
       ).catch((e) => console.error(`[extend] quiz falló (lección ${lessonId}):`, e));
     }),
   );

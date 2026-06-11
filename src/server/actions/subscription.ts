@@ -25,12 +25,34 @@ import { env } from "@/lib/env";
   o /api/flow/pro-return confirman vía confirmProMonthPaid.
 */
 
-export async function subscribeProAction(intentId: string | null) {
+/** Superficies de venta de Pro (atribución; sin esto no se optimiza ningún CTA). */
+const PRO_SOURCES = new Set([
+  "paywall_intent",
+  "planes_limite",
+  "planes_clases",
+  "dashboard_banner",
+  "perfil_renovacion",
+  "profesores_upsell",
+  "post_clase",
+  "quiz_trabado",
+]);
+
+export async function subscribeProAction(
+  intentId: string | null,
+  // Acepta FormData porque con bind parcial (solo intentId) React pasa el
+  // FormData del form como siguiente argumento — el guard de abajo lo filtra.
+  source?: string | FormData | null,
+) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
+
+  // Vía <form action={subscribeProAction.bind(null, id)}> el segundo argumento
+  // puede llegar como FormData — solo cuenta un string del catálogo cerrado.
+  const explicitSource =
+    typeof source === "string" && PRO_SOURCES.has(source) ? source : null;
 
   const [me] = await db
     .select({
@@ -56,11 +78,19 @@ export async function subscribeProAction(intentId: string | null) {
     (!sub.currentPeriodEnd || sub.currentPeriodEnd.getTime() > Date.now());
   if (vigente && sub?.providerSubscriptionId) redirect("/app/perfil");
 
+  // Atribución (solo metadata, jamás toca el cobro): explícita del CTA;
+  // si no, se deriva — venía del paywall de un intent, o ya fue/es Pro
+  // (sub existente con plan pro) = renovación desde el perfil.
+  const resolvedSource =
+    explicitSource ??
+    (intentId ? "paywall_intent" : sub?.plan === "pro" ? "perfil_renovacion" : null);
+
   if (env.PRO_SUBSCRIPTION_ENABLED !== "true") {
     return startProMonthCheckout({
       userId: user.id,
       email: me?.email || user.email!,
       intentId,
+      source: resolvedSource,
     });
   }
 
@@ -112,6 +142,8 @@ async function startProMonthCheckout(args: {
   userId: string;
   email: string;
   intentId: string | null;
+  /** Superficie que originó la compra (atribución; nullable = orgánico). */
+  source?: string | null;
 }) {
   const back = args.intentId ? `/app/pagar/${args.intentId}` : "/app/planes";
 
@@ -125,6 +157,7 @@ async function startProMonthCheckout(args: {
       amount: env.PRICE_PRO_CLP,
       currency: "CLP",
       status: "pending",
+      source: args.source ?? null,
     })
     .returning({ id: pathPurchases.id });
   if (!purchase) redirect(`${back}?error=pago`);

@@ -3,16 +3,33 @@ import { emailOutbox } from "@/db/schema";
 import { env } from "@/lib/env";
 
 export type ProgressEmailPayload = {
-  pathId: string;
-  pathTitle: string;
+  // Opcionales porque los correos de ciclo de vida (pro_expiring/cart_recovery)
+  // no nacen de una ruta; los flujos de avance SIEMPRE los setean.
+  pathId?: string;
+  pathTitle?: string;
   moduleId?: string;
   moduleTitle?: string;
   lessonTitles?: string[];
   quizzesPassed?: number;
   progressPct?: number;
   language?: string;
-  /** CTA secundaria del correo path_completed: la siguiente ruta sugerida. */
-  nextStep?: { topic: string; url: string };
+  /** CTA del correo path_completed/reengagement: la siguiente ruta sugerida
+   *  (reasons = "Porque dominaste X", congeladas con la sugerencia). */
+  nextStep?: { topic: string; url: string; reasons?: string[] };
+  /** Toque de la secuencia de ciclo de vida: D-3/D0 (Pro) o T+1h/T+24h (carro). */
+  touch?: "d3" | "d0" | "1h" | "24h";
+  // --- pro_expiring (renovación manual D-3/D0) ---
+  /** ISO de current_period_end al ENCOLAR: si al procesar cambió, ya renovó → skip. */
+  proPeriodEnd?: string;
+  proMinutesLeft?: number;
+  proRoutesLeft?: number;
+  // --- cart_recovery (intent pending_payment sin ruta) ---
+  intentId?: string;
+  topic?: string;
+  previewHook?: string;
+  previewModules?: string[];
+  /** Precio en CLP del CTA (ruta o Pro), para no hardcodear montos en copys. */
+  amountClp?: number;
 };
 
 /*

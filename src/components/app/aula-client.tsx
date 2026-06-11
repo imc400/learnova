@@ -4,19 +4,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
-import { ArrowLeft, Mic, MicOff, PhoneOff, GraduationCap, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Mic, MicOff, PhoneOff, GraduationCap, Loader2, Sparkles, CalendarCheck, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   endClassAction,
   proposeModuleAction,
   attachConversationAction,
+  markHomeworkFromClassAction,
+  scheduleNextClassAction,
+  recordLearningAction,
+  adjustDifficultyAction,
 } from "@/server/actions/live";
 
 /*
   Cliente del aula: conversación de voz con el profesor IA.
-  El prompt con el brief viene del SERVIDOR (overrides); aquí solo se conecta,
-  se muestra el estado y se cierra la clase con ritual.
+  En modo SEGURO el prompt jamás llega aquí (initiation webhook server-side);
+  en modo legado viaja como override. El cliente además le da al profesor su
+  noción del tiempo (avisos [SISTEMA]) y ejecuta sus client tools (pizarra,
+  tareas, video, agenda).
 */
 
 const MAX_CLASS_SECONDS = 30 * 60;
@@ -26,9 +32,37 @@ const MAX_INDUCTION_SECONDS = 12 * 60;
 const CONFIRM_END_MSG =
   "¿Terminar la clase? Se descuentan los minutos usados.";
 
+/** Avisos [SISTEMA]: el LLM no ve reloj — sin esto, el corte duro lo mata a
+ *  mitad de frase y el destilador inventa tareas que nadie dijo en voz alta. */
+const CLASS_MILESTONES: { at: number; msg: string }[] = [
+  { at: 15 * 60, msg: "[SISTEMA] Quedan 10 minutos de clase." },
+  {
+    at: 21 * 60,
+    msg: "[SISTEMA] Quedan 4 minutos: inicia el CIERRE ahora — pregunta metacognitiva, asigna las tareas en voz alta y despídete con end_call.",
+  },
+  { at: 27 * 60, msg: "[SISTEMA] Tiempo cumplido: despídete en este turno y usa end_call." },
+];
+const INDUCTION_MILESTONES: { at: number; msg: string }[] = [
+  { at: 6 * 60, msg: "[SISTEMA] Quedan 6 minutos de la inducción." },
+  {
+    at: 9 * 60,
+    msg: "[SISTEMA] Quedan 3 minutos: pasa al PRIMER PASO + CIERRE — deja la primera tarea, avisa del correo y despídete con end_call.",
+  },
+  { at: 11 * 60, msg: "[SISTEMA] Tiempo cumplido: despídete en este turno y usa end_call." },
+];
+
+interface OutlineModule {
+  title: string;
+  /** Lecciones con su video curado (para la tool mostrar_video). */
+  lessons: { title: string; videoId: string | null }[];
+}
+
 interface AulaProps {
   sessionId: string;
   signedUrl: string;
+  /** true = el prompt vive en el servidor (initiation webhook); aquí llegan
+   *  prompt/firstMessage vacíos y NO se envían overrides. */
+  secureInitiation: boolean;
   prompt: string;
   firstMessage: string;
   language: "es" | "en";
@@ -40,7 +74,9 @@ interface AulaProps {
   /** Tipo de sesión: la inducción tiene cierre propio (popup en la ruta). */
   kind: "class" | "induction";
   /** Mapa de la ruta para la PIZARRA que el profesor controla en vivo. */
-  outline: { title: string; lessons: string[] }[];
+  outline: OutlineModule[];
+  /** Tareas pendientes en el MISMO orden numerado que el brief (marcar_tarea). */
+  homework: { id: string; task: string }[];
 }
 
 export function AulaClient(props: AulaProps) {
@@ -54,6 +90,7 @@ export function AulaClient(props: AulaProps) {
 function AulaInner({
   sessionId,
   signedUrl,
+  secureInitiation,
   prompt,
   firstMessage,
   language,
@@ -63,6 +100,7 @@ function AulaInner({
   pathTitle,
   kind,
   outline,
+  homework,
 }: AulaProps) {
   const router = useRouter();
   const [elapsed, setElapsed] = useState(0);
@@ -73,6 +111,12 @@ function AulaInner({
   const [focusedModule, setFocusedModule] = useState<number | null>(null);
   // Módulos que el profesor agregó EN VIVO (se generan al cerrar la clase).
   const [addedModules, setAddedModules] = useState<string[]>([]);
+  // Tareas que el profesor tachó EN VIVO (marcar_tarea, índices 1..N).
+  const [markedTasks, setMarkedTasks] = useState<Set<number>>(new Set());
+  // Video que el profesor puso en la pizarra (mostrar_video) — pausado.
+  const [videoEmbed, setVideoEmbed] = useState<{ videoId: string; title: string } | null>(null);
+  // Próxima clase agendada en vivo (agendar_proxima_clase).
+  const [scheduledNote, setScheduledNote] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
   // Última frase del profesor (burbuja de transcripción, como el mock).
   const [agentLine, setAgentLine] = useState<string | null>(null);
@@ -84,8 +128,11 @@ function AulaInner({
   const endRequestedRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const startSessionRef = useRef<(() => Promise<void>) | null>(null);
+  // Hitos de tiempo ya avisados (no repetir tras reconexión).
+  const sentMilestonesRef = useRef<Set<number>>(new Set());
 
   const maxSeconds = kind === "induction" ? MAX_INDUCTION_SECONDS : MAX_CLASS_SECONDS;
+  const milestones = kind === "induction" ? INDUCTION_MILESTONES : CLASS_MILESTONES;
 
   const conversation = useConversation({
     onConnect: (props: { conversationId?: string }) => {
@@ -173,13 +220,21 @@ function AulaInner({
       await conversation.startSession({
           signedUrl,
           connectionType: "websocket",
-          overrides: {
-            agent: {
-              prompt: { prompt },
-              firstMessage,
-              language,
-            },
-          },
+          // Modo SEGURO: cero overrides — ElevenLabs pide el prompt + saludo
+          // a nuestro webhook con este session_id (UUID no adivinable).
+          // Modo legado: overrides como siempre (el prompt vino del server).
+          dynamicVariables: { session_id: sessionId },
+          ...(secureInitiation
+            ? {}
+            : {
+                overrides: {
+                  agent: {
+                    prompt: { prompt },
+                    firstMessage,
+                    language,
+                  },
+                },
+              }),
           // PIZARRA: el profesor llama estas tools y la UI reacciona en vivo.
           clientTools: {
             mostrar_ruta: async () => {
@@ -216,6 +271,79 @@ function AulaInner({
                 return "Hubo un error al agendar el módulo. Continúa la clase y dile al alumno que lo intentaremos de nuevo.";
               }
             },
+            marcar_tarea: async (params: { taskIndex?: number }) => {
+              const idx = Math.round(Number(params?.taskIndex ?? 0));
+              const item = homework[idx - 1];
+              if (!item) {
+                return `No existe la tarea ${idx}: las tareas pendientes van de 1 a ${homework.length}.`;
+              }
+              try {
+                const res = await markHomeworkFromClassAction(sessionId, item.id);
+                if (res.ok) {
+                  setBoardVisible(true);
+                  setMarkedTasks((prev) => new Set(prev).add(idx));
+                  return `Tarea ${idx} ("${item.task}") tachada en la pizarra del alumno.`;
+                }
+                return `No se pudo marcar: ${res.message}.`;
+              } catch {
+                return "Hubo un error al marcar la tarea. Continúa la clase.";
+              }
+            },
+            agendar_proxima_clase: async (params: { dias?: number }) => {
+              const dias = Math.round(Number(params?.dias ?? 0));
+              if (!dias || dias < 1 || dias > 14) {
+                return "No se pudo agendar: los días deben estar entre 1 y 14.";
+              }
+              try {
+                const res = await scheduleNextClassAction(sessionId, dias);
+                if (res.ok) {
+                  setScheduledNote(res.message);
+                  return res.message;
+                }
+                return `No se pudo agendar: ${res.message}.`;
+              } catch {
+                return "Hubo un error al agendar la próxima clase. Dile al alumno que puede volver cuando quiera.";
+              }
+            },
+            registrar_aprendizaje: async (params: { resumen?: string }) => {
+              const resumen = String(params?.resumen ?? "").trim();
+              if (!resumen) return "Falta el resumen del aprendizaje.";
+              try {
+                const res = await recordLearningAction(sessionId, resumen);
+                return res.ok ? res.message : `No se pudo registrar: ${res.message}.`;
+              } catch {
+                return "Hubo un error al registrar el aprendizaje. Continúa el cierre.";
+              }
+            },
+            mostrar_video: async (params: { moduleIndex?: number; lessonIndex?: number }) => {
+              const mi = Math.max(
+                0,
+                Math.min(Math.round(Number(params?.moduleIndex ?? 0)), outline.length - 1),
+              );
+              const lessonsOf = outline[mi]?.lessons ?? [];
+              const li = Math.max(
+                0,
+                Math.min(Math.round(Number(params?.lessonIndex ?? 0)), lessonsOf.length - 1),
+              );
+              const lesson = lessonsOf[li];
+              if (!lesson?.videoId) {
+                return `La lección "${lesson?.title ?? "indicada"}" no tiene video disponible — descríbelo en voz alta en su lugar.`;
+              }
+              setBoardVisible(true);
+              setFocusedModule(mi);
+              setVideoEmbed({ videoId: lesson.videoId, title: lesson.title });
+              return `Video de "${lesson.title}" visible en la pizarra (pausado: el alumno decide cuándo verlo).`;
+            },
+            ajustar_dificultad: async (params: { direccion?: string; motivo?: string }) => {
+              const direccion = String(params?.direccion ?? "").trim();
+              const motivo = String(params?.motivo ?? "").trim();
+              try {
+                const res = await adjustDifficultyAction(sessionId, direccion, motivo);
+                return res.ok ? res.message : `No se pudo ajustar: ${res.message}.`;
+              } catch {
+                return "Hubo un error al ajustar la dificultad. Continúa la clase.";
+              }
+            },
           },
         });
         if (!cancelled && !conversationIdRef.current) {
@@ -242,13 +370,25 @@ function AulaInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Timer + corte duro (30 min clase / ~12 min bienvenida; el prompt cierra
-  // ritualmente antes).
+  // Timer + avisos [SISTEMA] + corte duro (30 min clase / ~12 min bienvenida).
+  // Los avisos le dan al profesor su noción del tiempo: el prompt cierra
+  // ritualmente (tareas en voz alta + despedida) y el corte queda de último
+  // recurso. ElevenLabs además corta server-side a los 31 min.
   useEffect(() => {
     const t = setInterval(() => {
       if (!startedAtRef.current) return;
       const sec = Math.round((Date.now() - startedAtRef.current) / 1000);
       setElapsed(sec);
+      for (const m of milestones) {
+        if (sec >= m.at && !sentMilestonesRef.current.has(m.at)) {
+          sentMilestonesRef.current.add(m.at);
+          try {
+            conversation.sendContextualUpdate(m.msg);
+          } catch (e) {
+            console.error("[aula] aviso de tiempo falló:", e);
+          }
+        }
+      }
       if (sec >= maxSeconds) {
         endRequestedRef.current = true;
         void conversation.endSession();
@@ -393,6 +533,13 @@ function AulaInner({
           </div>
         )}
 
+        {/* Próxima clase agendada en vivo por el profesor. */}
+        {scheduledNote && (
+          <p className="mt-3 flex items-center gap-1.5 text-xs font-medium text-primary">
+            <CalendarCheck className="size-3.5" /> {scheduledNote}
+          </p>
+        )}
+
         {connected && (
           <p className="mt-3 font-display text-3xl font-bold tabular-nums text-primary">
             {mm}:{ss}
@@ -432,6 +579,25 @@ function AulaInner({
       {boardVisible && (
         <aside className="ruled rounded-2xl border border-primary/30 bg-card p-5 shadow-soft">
           <p className="hand text-lg">pizarra de {teacherName} ✺</p>
+
+          {/* Video que el profesor dejó señalado (pausado — sin autoplay). */}
+          {videoEmbed && (
+            <div className="mt-3">
+              <div className="aspect-video overflow-hidden rounded-lg border border-border">
+                <iframe
+                  src={`https://www.youtube-nocookie.com/embed/${videoEmbed.videoId}`}
+                  title={videoEmbed.title}
+                  className="size-full"
+                  allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              </div>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Tu profesor te dejó este video: {videoEmbed.title}
+              </p>
+            </div>
+          )}
+
           <ol className="mt-3 space-y-2">
             {outline.map((m, i) => {
               const focused = focusedModule === i;
@@ -453,7 +619,7 @@ function AulaInner({
                     <ul className="mt-1.5 space-y-0.5">
                       {m.lessons.map((l, li) => (
                         <li key={li} className="text-xs text-muted-foreground">
-                          · {l}
+                          · {l.title}
                         </li>
                       ))}
                     </ul>
@@ -475,6 +641,35 @@ function AulaInner({
               </li>
             ))}
           </ol>
+
+          {/* Tareas pendientes: el profesor las tacha EN VIVO (marcar_tarea). */}
+          {homework.length > 0 && (
+            <div className="mt-4">
+              <p className="hand text-base">tus tareas ✺</p>
+              <ol className="mt-1.5 space-y-1">
+                {homework.map((h, i) => {
+                  const done = markedTasks.has(i + 1);
+                  return (
+                    <li
+                      key={h.id}
+                      className={`flex items-start gap-1.5 text-xs transition-all duration-300 ${
+                        done ? "text-muted-foreground line-through" : ""
+                      }`}
+                    >
+                      {done ? (
+                        <Check className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                      ) : (
+                        <span className="mt-0.5 inline-block size-3.5 shrink-0 rounded-sm border border-border" />
+                      )}
+                      <span>
+                        {i + 1}. {h.task}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          )}
         </aside>
       )}
       </div>

@@ -10,7 +10,7 @@ import {
   createRouteIntentAction,
   wizardQuestionsAction,
 } from "@/server/actions/paths";
-import type { WizardQuestion } from "@/lib/ai/wizard";
+import type { TopicCheck, WizardQuestion } from "@/lib/ai/wizard";
 
 /*
   Intake adaptativo en 2 pasos:
@@ -44,6 +44,10 @@ export function CreateWizard({
   const [language, setLanguage] = useState(defaultLanguage);
   const [weeklyHours, setWeeklyHours] = useState("");
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
+  const [topicCheck, setTopicCheck] = useState<TopicCheck | null>(null);
+  // Calibración de nivel: si el usuario decide mantener su nivel declarado,
+  // no se insiste en esta pasada.
+  const [levelKept, setLevelKept] = useState(false);
   const [answers, setAnswers] = useState<Answers>({});
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -80,8 +84,19 @@ export function CreateWizard({
     startQuestions(async () => {
       try {
         const res = await wizardQuestionsAction({ topic: topic.trim(), level, language });
+        // Gate de viabilidad: tema inseguro/inviable no avanza (sin esto se
+        // podía crear/pagar una ruta que la generación iba a rehusar).
+        if (res.topicCheck.verdict === "inseguro" || res.topicCheck.verdict === "inviable") {
+          setError(
+            res.topicCheck.note ??
+              "Ese tema no lo podemos convertir en una ruta. Prueba contarlo con otras palabras.",
+          );
+          return;
+        }
+        setTopicCheck(res.topicCheck);
         setQuestions(res.questions);
         setAnswers({});
+        setLevelKept(false);
         setStep(2);
       } catch {
         setError("No pudimos preparar tus preguntas. Intenta de nuevo.");
@@ -130,6 +145,73 @@ export function CreateWizard({
     [questions, answers],
   );
 
+  // Calibración de nivel: si la respuesta de experiencia revela un nivel
+  // distinto al declarado, se sugiere corregirlo (el level es 1/3 de la
+  // cache key canónica y etiqueta el canon para futuros usuarios).
+  const levelSuggestion = useMemo(() => {
+    if (levelKept) return null;
+    for (const q of questions) {
+      if (q.mapsTo !== "priorExperience") continue;
+      const sel = answers[q.id]?.selected ?? [];
+      for (const o of q.options) {
+        if (o.levelSignal && o.levelSignal !== level && sel.includes(o.text)) {
+          return o.levelSignal;
+        }
+      }
+    }
+    return null;
+  }, [questions, answers, level, levelKept]);
+
+  /** Arquetipo de la meta elegida ("Otro" con texto libre → "otro"). */
+  const deriveArchetype = (): string | null => {
+    for (const q of questions) {
+      if (!q.options.some((o) => o.archetype)) continue;
+      const a = answers[q.id];
+      if (!a) continue;
+      for (const o of q.options) {
+        if (o.archetype && a.selected.includes(o.text)) return o.archetype;
+      }
+      if (a.selected.includes(OTHER) && a.other.trim()) return "otro";
+    }
+    return null;
+  };
+
+  /** Slug del medio/equipo elegido (faceta legítima del caché — Track A). */
+  const deriveVariant = (): string | null => {
+    for (const q of questions) {
+      const a = answers[q.id];
+      if (!a) continue;
+      for (const o of q.options) {
+        if (o.variant && a.selected.includes(o.text)) return o.variant;
+      }
+    }
+    return null;
+  };
+
+  /** Respuestas estructuradas para route_intents.wizard_answers. */
+  const buildWizardAnswers = () =>
+    questions
+      .map((q) => {
+        const a = answers[q.id];
+        const selected = (a?.selected ?? [])
+          .filter((v) => v !== OTHER && v.trim())
+          .slice(0, 8)
+          .map((s) => s.slice(0, 140));
+        const other =
+          a?.selected.includes(OTHER) && a.other.trim()
+            ? a.other.trim().slice(0, 300)
+            : null;
+        return {
+          id: q.id.slice(0, 60),
+          label: q.label.slice(0, 200),
+          kind: q.kind,
+          mapsTo: q.mapsTo,
+          selected,
+          other,
+        };
+      })
+      .filter((ans) => ans.selected.length > 0 || ans.other);
+
   // Misma regla que el servidor (normalizePhone): + opcional y 8-15 dígitos.
   const phoneValid = /^\+?\d{8,15}$/.test(phone.trim().replace(/[\s().-]/g, ""));
 
@@ -175,6 +257,9 @@ export function CreateWizard({
           priorExperience: priorExperience ? priorExperience.slice(0, 500) : undefined,
           phone: phone.trim(),
           from: fromPathId || undefined,
+          goalArchetype: deriveArchetype(),
+          variant: deriveVariant(),
+          wizardAnswers: buildWizardAnswers(),
         });
       } catch (e) {
         // redirect() lanza internamente: solo es error real si NO es redirect.
@@ -267,11 +352,13 @@ export function CreateWizard({
             )}
           </Button>
           <p className="text-center text-xs text-muted-foreground">
-            La IA preparará 3-4 preguntas hechas a la medida de tu tema.
+            La IA preparará 2-3 preguntas hechas a la medida de tu tema.
           </p>
         </div>
       ) : (
         <div className="flex flex-col gap-6">
+          {(topicCheck?.verdict === "ambiguo" || topicCheck?.verdict === "muy_amplio") &&
+            topicCheck.note && <NotaBanner tone="aviso">{topicCheck.note}</NotaBanner>}
           {questions.map((q) => {
             const a = answers[q.id];
             return (
@@ -287,7 +374,7 @@ export function CreateWizard({
                   />
                 ) : (
                   <div className="flex flex-wrap gap-2">
-                    {[...q.options, OTHER].map((opt) => {
+                    {[...q.options.map((o) => o.text), OTHER].map((opt) => {
                       const isOther = opt === OTHER;
                       const active = a?.selected.includes(opt) ?? false;
                       return (
@@ -342,6 +429,21 @@ export function CreateWizard({
             )}
           </div>
 
+          {levelSuggestion && (
+            <NotaBanner tone="aviso">
+              Por tu respuesta, te conviene partir en{" "}
+              <span className="font-bold capitalize">{levelSuggestion}</span> —
+              ¿lo cambiamos?
+              <span className="mt-2 flex flex-wrap gap-2">
+                <Button size="sm" type="button" onClick={() => setLevel(levelSuggestion)}>
+                  Sí, partir en {levelSuggestion}
+                </Button>
+                <Button size="sm" type="button" variant="outline" onClick={() => setLevelKept(true)}>
+                  Mantener {level}
+                </Button>
+              </span>
+            </NotaBanner>
+          )}
           <div className="flex items-center gap-3">
             <Button
               variant="outline"

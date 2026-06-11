@@ -57,9 +57,7 @@ async function emitMilestoneEmails(
 
       // "Siguiente paso": se genera AQUÍ (antes del outbox, que se encola una
       // sola vez) para que la card de la ruta y el correo cuenten lo mismo.
-      const { getOrCreateNextPathSuggestion, nextPathUrl } = await import(
-        "@/lib/next-path"
-      );
+      const { getOrCreateNextPathSuggestion } = await import("@/lib/next-path");
       const suggestion = await getOrCreateNextPathSuggestion({
         userId,
         sourcePathId: ctx.pathId,
@@ -71,10 +69,13 @@ async function emitMilestoneEmails(
         lessonTitles: titles.map((t) => t.title).slice(0, 8),
         progressPct: 100,
         language: ctx.language,
+        // CTA primaria del correo → puente one-click (GET-seguro) con la
+        // sugerencia congelada; las reasons van como bullets de venta.
         nextStep: suggestion
           ? {
               topic: suggestion.topic,
-              url: nextPathUrl(suggestion, ctx.pathId),
+              url: `/app/rutas/${ctx.pathId}/siguiente?via=email`,
+              reasons: suggestion.reasons,
             }
           : undefined,
       });
@@ -119,6 +120,16 @@ export interface GradeResult {
   results: QuestionResult[];
   /** Recompensas de esta acción (XP, racha, logros). Null si no aprobó. */
   gamification: GamificationResult | null;
+  /**
+   * Puente quiz trabado → clase en vivo (2+ intentos reprobados = traba real).
+   * Calculado server-side; la elegibilidad FINAL la valida startClassAction
+   * (gates de 40% y cupo — la UI solo refleja, jamás decide).
+   * - "clase": puede iniciar la clase ahora (form → startClassAction).
+   * - "planes": sin minutos en la ruta y no es Pro → /app/planes?source=quiz_trabado.
+   * Null si aprobó, si lleva <2 intentos fallidos o si va bajo el 40% (el gate
+   * pedagógico no se vende: ahí toca avanzar, no comprar).
+   */
+  classBridge: { pathId: string; cta: "clase" | "planes" } | null;
 }
 
 function sameSet(a: string[], b: string[]): boolean {
@@ -266,7 +277,58 @@ export async function gradeQuizAction(
     await emitMilestoneEmails(user.id, gamification, ctx, pct);
   }
 
-  return { score, passed, results, gamification };
+  // Puente quiz trabado → clase (D-P1.5): con 2+ intentos reprobados, la
+  // clase en vivo es la herramienta diseñada exactamente para destrabarse —
+  // y el brief del profesor YA consume los quizzes fallados. Nunca lanza.
+  let classBridge: GradeResult["classBridge"] = null;
+  if (!passed) {
+    try {
+      const [fails] = await db
+        .select({ n: sql<number>`count(*)::int` })
+        .from(quizAttempts)
+        .where(
+          and(
+            eq(quizAttempts.userId, user.id),
+            eq(quizAttempts.quizId, quizId),
+            eq(quizAttempts.passed, false),
+          ),
+        );
+      if (Number(fails?.n ?? 0) >= 2) {
+        const pct = await pathProgressPct(user.id, ctx.pathId);
+        const { getEntitlement } = await import("@/lib/subscription");
+        const { isPro } = await getEntitlement(user.id);
+        // El gate pedagógico del 40% manda (no se vende un bypass): bajo el
+        // 40% no hay puente. Pro salta ese gate server-side, así que sí ve CTA.
+        if (isPro || pct >= 40) {
+          // Minutos restantes de la ruta (lectura informativa; el cobro/cupo
+          // REAL lo valida startClassAction al iniciar).
+          const { liveSessions } = await import("@/db/schema");
+          const [used] = await db
+            .select({
+              sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
+            })
+            .from(liveSessions)
+            .where(
+              and(
+                eq(liveSessions.userId, user.id),
+                eq(liveSessions.pathId, ctx.pathId),
+              ),
+            );
+          const usedMin = Math.ceil(Number(used?.sec ?? 0) / 60);
+          const { env } = await import("@/lib/env");
+          const routeLeft = env.CLASS_MINUTES_PER_ROUTE - usedMin;
+          classBridge = {
+            pathId: ctx.pathId,
+            cta: !isPro && routeLeft <= 0 ? "planes" : "clase",
+          };
+        }
+      }
+    } catch (e) {
+      console.error("[quiz] classBridge falló (no bloquea el resultado):", e);
+    }
+  }
+
+  return { score, passed, results, gamification, classBridge };
 }
 
 /**

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
 import { routeIntents } from "@/db/schema";
 import { AutoRefresh } from "@/components/app/auto-refresh";
+import { reconcileIntentWithProvider } from "@/lib/ops/reconcile";
 import { NotaBanner } from "@/components/app/brand/nota-banner";
 import { CelebracionStickers } from "@/components/app/brand/celebracion-stickers";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,11 @@ function DemoraBanner() {
 
 /**
  * Retorno desde Flow. El webhook (server-to-server) es quien confirma y crea
- * la ruta; aquí solo miramos el estado y refrescamos hasta verlo.
+ * la ruta; aquí miramos el estado y refrescamos hasta verlo — Y, si el intent
+ * sigue pendiente (webhook perdido), preguntamos ACTIVAMENTE al proveedor
+ * (E-P1.4): el usuario volviendo del checkout es la señal más fuerte posible
+ * de "probablemente pagó". Throttle de 30 s vía updatedAt para no consultar
+ * al proveedor en cada tick del polling de la página.
  */
 export default async function RetornoPage({
   params,
@@ -43,12 +48,44 @@ export default async function RetornoPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const [intent] = await db
-    .select({ status: routeIntents.status, pathId: routeIntents.pathId })
+  let [intent] = await db
+    .select({
+      status: routeIntents.status,
+      pathId: routeIntents.pathId,
+      updatedAt: routeIntents.updatedAt,
+    })
     .from(routeIntents)
     .where(and(eq(routeIntents.id, intentId), eq(routeIntents.userId, user.id)))
     .limit(1);
   if (!intent) notFound();
+
+  if (
+    intent.status === "pending_payment" &&
+    Date.now() - intent.updatedAt.getTime() > 30_000
+  ) {
+    // Marca el intento ANTES de consultar (throttle aunque el proveedor cuelgue).
+    await db
+      .update(routeIntents)
+      .set({ updatedAt: new Date() })
+      .where(eq(routeIntents.id, intentId))
+      .catch(() => {});
+    const resultado = await reconcileIntentWithProvider(intentId).catch(
+      () => "unknown" as const,
+    );
+    if (resultado === "paid") {
+      // confirmIntentPaid ya creó la ruta y encoló la generación: releer.
+      const [fresh] = await db
+        .select({
+          status: routeIntents.status,
+          pathId: routeIntents.pathId,
+          updatedAt: routeIntents.updatedAt,
+        })
+        .from(routeIntents)
+        .where(eq(routeIntents.id, intentId))
+        .limit(1);
+      if (fresh) intent = fresh;
+    }
+  }
 
   if (intent.pathId) redirect(`/app/rutas/${intent.pathId}`);
 

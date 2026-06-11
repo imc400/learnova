@@ -3,19 +3,21 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, X, Loader2, ArrowRight } from "lucide-react";
+import { Check, X, Loader2, ArrowRight, GraduationCap } from "lucide-react";
 import { Flame, Play } from "@/components/marketing/landing/icons";
 import { Button } from "@/components/ui/button";
 import { badgeVariants } from "@/components/ui/badge";
 import { CelebracionStickers } from "@/components/app/brand/celebracion-stickers";
 import { ModuleRating } from "@/components/app/module-rating";
 import { RichText } from "@/components/app/rich-text";
+import { SubmitButton } from "@/components/app/submit-button";
 import { mmss, requestVideoSeek } from "@/components/app/youtube-embed";
 import { cn } from "@/lib/utils";
 import {
   gradeQuizAction,
   type GradeResult,
 } from "@/server/actions/quiz";
+import { startClassAction } from "@/server/actions/live";
 
 interface QuizQuestion {
   id: string;
@@ -151,6 +153,39 @@ export function Quiz({
               {/* Pico emocional = el mejor momento para pedir feedback (peak-end). */}
               <ModuleRating moduleId={g.moduleCompleted.id} />
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Puente quiz trabado → clase en vivo (2+ intentos reprobados): el
+          producto diseñado para destrabarse, en el momento exacto de la traba.
+          La elegibilidad real la valida startClassAction server-side. */}
+      {result && !result.passed && result.classBridge && (
+        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <p className="flex items-start gap-2 text-sm font-medium">
+            <GraduationCap className="mt-0.5 size-4 shrink-0 text-primary" />
+            Esto se conversa mejor que se relee. Tu profesor ya sabe qué
+            preguntas te costaron — una clase de 25 min puede destrabarlo.
+          </p>
+          {result.classBridge.cta === "clase" ? (
+            <form
+              action={startClassAction.bind(null, result.classBridge.pathId, "class")}
+              className="mt-3"
+            >
+              <SubmitButton variant="primary" size="sm" pendingText="Preparando tu clase…">
+                <GraduationCap className="size-4" /> Iniciar clase con mi profesor
+              </SubmitButton>
+            </form>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Usaste los minutos de clase de esta ruta. Con Aulia Pro tienes
+                120 minutos al mes, con todos tus profesores.
+              </p>
+              <Button asChild size="sm" variant="outline" className="mt-3">
+                <Link href="/app/planes?source=quiz_trabado">Conocer Aulia Pro</Link>
+              </Button>
+            </>
           )}
         </div>
       )}

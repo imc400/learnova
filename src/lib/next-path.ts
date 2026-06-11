@@ -43,6 +43,17 @@ function nextLevel(level: string): "principiante" | "intermedio" | "avanzado" {
   return "avanzado";
 }
 
+/** Normaliza un tema para comparar ("Fotografía" ≈ "fotografia"): minúsculas,
+ *  sin diacríticos, espacios colapsados. Solo para detectar colisiones. */
+function normalizeTopic(topic: string): string {
+  return topic
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Fallback determinista: mismo tema, nivel siguiente. Nunca falla. */
 function deterministicSuggestion(args: {
   topic: string;
@@ -94,16 +105,34 @@ export async function getOrCreateNextPathSuggestion(args: {
       .limit(1);
     if (!path) return null;
 
+    // Temas que el usuario YA cursó: insumo del prompt de Haiku Y del guard
+    // del caché cross-usuario (sin esto, el HIT puede ofrecerle por triplicado
+    // —card, correo, profesor de cierre— una ruta que ya tiene).
+    const previous = await db
+      .select({ topic: learningPaths.topic })
+      .from(learningPaths)
+      .where(eq(learningPaths.userId, args.userId));
+    const previousTopics = new Set(previous.map((p) => normalizeTopic(p.topic)));
+
     // 1) Caché cross-usuario por esqueleto (misma ruta canónica = misma sugerencia).
     let suggestion: NextPathSuggestion | null = null;
     let source = "cache";
+    let collidedWithHistory = false;
     if (path.skeletonCacheKey) {
       const [cached] = await db
         .select()
         .from(nextPathSuggestions)
         .where(eq(nextPathSuggestions.skeletonCacheKey, path.skeletonCacheKey))
         .limit(1);
-      if (cached) {
+      if (cached && previousTopics.has(normalizeTopic(cached.topic))) {
+        // La sugerencia canónica colisiona con su historial: cae al camino
+        // Haiku (que recibe la lista de exclusión). Las reasons del caché eran
+        // seguras, pero el topic repetido quema el upsell estrella.
+        collidedWithHistory = true;
+        console.log(
+          `[next-path] HIT descartado: "${cached.topic}" ya cursado por el usuario — regenerando con exclusión`,
+        );
+      } else if (cached) {
         suggestion = {
           topic: cached.topic,
           goal: cached.goal,
@@ -123,10 +152,6 @@ export async function getOrCreateNextPathSuggestion(args: {
           .from(modules)
           .where(eq(modules.pathId, args.sourcePathId))
           .orderBy(modules.orderIndex);
-        const previous = await db
-          .select({ topic: learningPaths.topic })
-          .from(learningPaths)
-          .where(eq(learningPaths.userId, args.userId));
         const intake = (path.intake ?? {}) as Partial<Intake>;
 
         const client = getAnthropic();
@@ -173,13 +198,15 @@ export async function getOrCreateNextPathSuggestion(args: {
       });
     }
 
-    // 4) Persistir (idempotente; carrera segura).
+    // 4) Persistir (idempotente; carrera segura). Si la sugerencia se generó
+    //    excluyendo el historial de ESTE usuario (colisión con el HIT), no se
+    //    indexa como canónica del esqueleto: es personal, no cross-usuario.
     await db
       .insert(nextPathSuggestions)
       .values({
         userId: args.userId,
         sourcePathId: args.sourcePathId,
-        skeletonCacheKey: path.skeletonCacheKey,
+        skeletonCacheKey: collidedWithHistory ? null : path.skeletonCacheKey,
         topic: suggestion.topic,
         goal: suggestion.goal,
         level: suggestion.level,
@@ -195,13 +222,19 @@ export async function getOrCreateNextPathSuggestion(args: {
   }
 }
 
-/** URL de /app/crear precargada con la sugerencia. */
-export function nextPathUrl(s: NextPathSuggestion, fromPathId: string): string {
+/** URL de /app/crear precargada con la sugerencia ("ajustar antes de crear").
+ *  `via` instrumenta el funnel de continuación (card | email | clase_cierre). */
+export function nextPathUrl(
+  s: NextPathSuggestion,
+  fromPathId: string,
+  via?: "card" | "email" | "clase_cierre",
+): string {
   const params = new URLSearchParams({
     topic: s.topic,
     goal: s.goal,
     level: s.level,
     from: fromPathId,
   });
+  if (via) params.set("via", via);
   return `/app/crear?${params.toString()}`;
 }

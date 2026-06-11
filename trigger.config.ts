@@ -29,6 +29,21 @@ export default defineConfig({
           // summarize-class lee la transcripción desde ElevenLabs: sin esta
           // var el worker muere y el alumno se queda sin resumen ni tareas.
           "ELEVENLABS_API_KEY",
+          // Ops (Track E): el cron reconcile consulta a Flow/MP (webhook
+          // perdido) y alertFounder manda WhatsApp — corren EN el worker.
+          "PAYMENT_PROVIDER",
+          "FLOW_API_KEY",
+          "FLOW_SECRET_KEY",
+          "FLOW_BASE_URL",
+          "MP_ACCESS_TOKEN",
+          "CALLMEBOT_PHONE",
+          "CALLMEBOT_APIKEY",
+          // Cuota YouTube (circuit breaker) + kill-switch de IA + gate de
+          // correos de ciclo de vida (los crons de Track D corren aquí).
+          "YOUTUBE_QUOTA_DAILY_LIMIT",
+          "YOUTUBE_QUOTA_SOFT_LIMIT",
+          "AI_DISABLED",
+          "LIFECYCLE_EMAILS_ENABLED",
         ];
         return keys
           .filter((k) => process.env[k])

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { Loader2, CheckCircle2, AlertTriangle, RefreshCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { getGenerationProgress } from "@/server/actions/progress";
+import { retryGenerationAction } from "@/server/actions/ops";
+import { Button } from "@/components/ui/button";
 
 /** Polling de RESPALDO (Realtime es la vía rápida): ≥5s para no duplicar. */
 const POLL_INTERVAL_MS = 5000;
@@ -56,6 +58,8 @@ export function GeneratingState({
   const [eta, setEta] = useState<string | null>(null);
   // Estado failed PROPIO: jamás forzar la barra a 100 (flash "¡Ruta lista!").
   const [failed, setFailed] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [retrying, startRetry] = useTransition();
 
   const doneRef = useRef<number | null>(null);
   const totalRef = useRef<number | null>(totalLessons);
@@ -93,8 +97,9 @@ export function GeneratingState({
       if (p.status === "failed" && !finishedRef.current) {
         finishedRef.current = true;
         setFailed(true);
-        // El refresh muestra la vista de error del servidor (con salida real).
-        setTimeout(() => router.refresh(), 600);
+        // SIN router.refresh(): la vista failed de ESTE componente trae el
+        // botón "Reintentar" real (E-P1.3) — refrescar la cambiaría por la
+        // vista estática del servidor y perderíamos la salida en un clic.
         return;
       }
       if (p.status === "ready" && !finishedRef.current) {
@@ -160,7 +165,21 @@ export function GeneratingState({
   const pct = Math.min(100, Math.max(0, progress));
 
   // Error: tinta roja sobre layout recto, sin gestos (zona de sobriedad).
+  // El botón Reintentar es real (E-P1.3): la generación es idempotente y
+  // resume desde el caché — lo ya generado no se pierde ni se re-paga.
   if (failed) {
+    const retry = () =>
+      startRetry(async () => {
+        setRetryError(null);
+        const r = await retryGenerationAction(pathId);
+        if (r.ok) {
+          finishedRef.current = false;
+          setFailed(false);
+          router.refresh();
+        } else {
+          setRetryError(r.error);
+        }
+      });
     return (
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center sm:p-12">
         <AlertTriangle className="mx-auto size-8 text-destructive" />
@@ -168,8 +187,29 @@ export function GeneratingState({
           No pudimos terminar tu ruta
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Algo falló durante la generación — no perdiste nada. Estamos cargando
-          el detalle, o escríbenos a hola@aulia.ai y lo resolvemos.
+          Algo falló durante la generación — no perdiste nada: lo avanzado quedó
+          guardado y el reintento retoma desde ahí.
+        </p>
+        <Button onClick={retry} disabled={retrying} className="mt-4">
+          {retrying ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <RefreshCcw className="size-4" />
+          )}
+          {retrying ? "Re-encolando…" : "Reintentar generación"}
+        </Button>
+        <p className="mt-3 text-xs text-muted-foreground">
+          {retryError ? (
+            <span className="text-destructive">{retryError}</span>
+          ) : (
+            <>
+              ¿Sigue fallando? Escríbenos a{" "}
+              <a href="mailto:hola@aulia.ai" className="font-medium text-foreground hover:underline">
+                hola@aulia.ai
+              </a>{" "}
+              y lo resolvemos al tiro.
+            </>
+          )}
         </p>
       </div>
     );
