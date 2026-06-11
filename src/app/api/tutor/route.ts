@@ -231,7 +231,7 @@ export async function POST(req: Request) {
     .join("\n\n");
 
   const result = streamText({
-    model: anthropic(MODELS.generator),
+    model: anthropic(MODELS.tutor),
     system,
     messages: history,
     maxOutputTokens: 1024,

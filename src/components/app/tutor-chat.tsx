@@ -80,12 +80,31 @@ export function TutorChat({
     setStreaming(true);
 
     try {
+      // Timeout duro de 35s: en móvil un fetch colgado dejaba "escribiendo"
+      // eterno (bug reportado por el fundador). AbortController lo corta y
+      // cae al mensaje de error con reintento.
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 35_000);
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // El API acota a los últimos 12 turnos: mandar más es pagar upload inútil.
         body: JSON.stringify({ messages: next.slice(-12), context, lessonId }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timeout);
+      // Errores del API (429 de ritmo, 503 kill-switch) llegan como texto
+      // plano amable: mostrarlo como mensaje, jamás streamearlo a medias.
+      if (!res.ok) {
+        const msg = (await res.text().catch(() => "")) ||
+          "No pudimos responder ahora. Intenta de nuevo en unos segundos.";
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: msg };
+          return copy;
+        });
+        return;
+      }
       if (!res.body) throw new Error("Sin stream");
 
       const reader = res.body.getReader();

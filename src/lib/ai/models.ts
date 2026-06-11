@@ -9,6 +9,11 @@ export const MODELS = {
   generator: "claude-sonnet-4-6",
   /** Nivel 3 — rankear videos, clasificar y corregir respuestas. */
   ranker: "claude-haiku-4-5",
+  // Tutor de texto: Haiku 4.5 — con el contexto de la lección + memoria del
+  // profesor responde excelente, ~3-5x más barato que Sonnet y con primer
+  // token más rápido (clave en móvil). La VOZ sigue en Sonnet (decisión
+  // fundador 2026-06-11: chat barato, voz premium).
+  tutor: "claude-haiku-4-5",
 } as const;
 
 export type ModelTier = keyof typeof MODELS;
