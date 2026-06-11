@@ -309,7 +309,8 @@ export async function createAccountAndIntentAction(input: {
   if (paywallOn) redirect(`/app/pagar/${intent.id}${input.plan === "pro" ? "?plan=pro" : ""}`);
 
   // Paywall apagado → flujo free de siempre (techo de costos intacto).
-  if (!isPro) {
+  // Admin exento: cuenta de pruebas del fundador (rutas infinitas).
+  if (!isPro && !me?.isAdmin) {
     const [[createdPaths], [completed]] = await Promise.all([
       db.select({ n: count() }).from(learningPaths).where(eq(learningPaths.userId, user.id)),
       db

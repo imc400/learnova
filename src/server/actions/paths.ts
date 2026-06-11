@@ -68,7 +68,13 @@ export async function createPathAction(formData: FormData) {
   // COMPLETADA (ledger path_completed, no gameable por URL). Quien termina,
   // desbloquea la siguiente — solo los que aprenden generan costo nuevo.
   const { isPro } = await getEntitlement(user.id);
-  if (!isPro) {
+  const [admin] = await db
+    .select({ isAdmin: profiles.isAdmin })
+    .from(profiles)
+    .where(eq(profiles.id, user.id))
+    .limit(1);
+  // Admin exento del techo free: cuenta de pruebas del fundador.
+  if (!isPro && !admin?.isAdmin) {
     const [[created], [completed]] = await Promise.all([
       db
         .select({ n: count() })
@@ -256,7 +262,8 @@ export async function createRouteIntentAction(input: {
   }
 
   // Sin paywall: techo de costos free de siempre (cupo ganado al completar).
-  if (!isPro) {
+  // Admin exento (cuenta de pruebas del fundador).
+  if (!isPro && !me?.isAdmin) {
     const [[created], [completed]] = await Promise.all([
       db.select({ n: count() }).from(learningPaths).where(eq(learningPaths.userId, user.id)),
       db
