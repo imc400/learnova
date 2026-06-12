@@ -23,6 +23,9 @@ import { env } from "@/lib/env";
 
 export const metadata = { title: "Tus profesores" };
 export const dynamic = "force-dynamic";
+// startClassAction (clase libre Pro) se invoca desde aquí: el primer clic de
+// un esqueleto nuevo crea persona + agente de voz (>15s por defecto Vercel).
+export const maxDuration = 60;
 
 /*
   TUS PROFESORES: un profesor por ruta, con su cara, su especialidad y el

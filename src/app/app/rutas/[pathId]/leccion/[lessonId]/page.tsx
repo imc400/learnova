@@ -46,6 +46,11 @@ export async function generateMetadata({
   };
 }
 
+// El puente quiz→clase invoca startClassAction desde esta página: el primer
+// clic puede crear persona + agente de voz (>15s) — mismo timeout que la
+// página de la ruta.
+export const maxDuration = 60;
+
 export default async function LessonPage({
   params,
 }: {

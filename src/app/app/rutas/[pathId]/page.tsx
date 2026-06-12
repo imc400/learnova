@@ -88,6 +88,12 @@ const CLASS_ERRORS: Record<string, { text: string; cta?: { href: string; label: 
   },
 };
 
+// startClassAction se invoca desde esta página: el PRIMER clic de una ruta
+// nueva crea persona (Haiku) + agente de voz (ElevenLabs) — más de los ~15s
+// por defecto de Vercel. Sin esto, el server action muere a mitad y el aula
+// jamás levanta (fallo real en la demo universidad 2026-06-11).
+export const maxDuration = 60;
+
 export default async function PathPage({
   params,
   searchParams,
