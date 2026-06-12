@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 import { fbqTrack } from "@/lib/analytics/meta";
+import { gtagConversion } from "@/lib/analytics/gtag";
+import { env } from "@/lib/env";
 
 /*
   Purchase del lado del navegador — el evento clave de las campañas.
@@ -24,19 +26,29 @@ export function PurchaseTracker({
   monto: number;
 }) {
   useEffect(() => {
-    const key = `aulia:meta-purchase:${compra}`;
+    // Conversión de compra para Meta (Purchase) y Google Ads (conversion), con
+    // el MISMO id de compra: eventID en Meta y transaction_id en Google ambos
+    // deduplican una recarga con la URL guardada en el historial.
+    const fire = () => {
+      fbqTrack("Purchase", { value: monto, currency: "CLP" }, `purchase-${compra}`);
+      // Google Ads solo si hay etiqueta de conversión de compra configurada.
+      if (env.NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL) {
+        gtagConversion(env.NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL, {
+          value: monto,
+          currency: "CLP",
+          transactionId: `purchase-${compra}`,
+        });
+      }
+    };
+    const key = `aulia:purchase-tracked:${compra}`;
     try {
       if (!localStorage.getItem(key)) {
-        fbqTrack(
-          "Purchase",
-          { value: monto, currency: "CLP" },
-          `purchase-${compra}`,
-        );
+        fire();
         localStorage.setItem(key, "1");
       }
     } catch {
-      // localStorage bloqueado: disparar igual — el eventID deduplica en Meta.
-      fbqTrack("Purchase", { value: monto, currency: "CLP" }, `purchase-${compra}`);
+      // localStorage bloqueado: disparar igual — los ids deduplican aguas abajo.
+      fire();
     }
 
     try {

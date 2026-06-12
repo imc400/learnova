@@ -80,8 +80,9 @@ Compartimos datos únicamente con los proveedores que hacen posible el Servicio,
 | **Flow.cl** | Procesamiento de pagos en Chile | https://www.flow.cl/wp-content/uploads/2023/06/politica-de-privacidad.pdf |
 | **Vercel** | Alojamiento (hosting) de la aplicación | https://vercel.com/legal/privacy-policy |
 | **Meta** | Medición de la efectividad de nuestras campañas publicitarias (píxel de Meta) | https://www.facebook.com/privacy/policy |
+| **Google Ads** | Medición de conversiones de nuestras campañas publicitarias (etiqueta de Google Ads / gtag) | https://policies.google.com/privacy |
 
-Usamos el píxel de Meta para medir la efectividad de nuestras campañas; puedes limitar las cookies de publicidad en tu navegador.
+Usamos el píxel de Meta y la etiqueta de Google Ads para medir la efectividad de nuestras campañas; puedes limitar las cookies de publicidad en tu navegador.
 
 Cuando interactúas con el tutor de IA, el texto de tu consulta y el contexto de tu lección se envían a Anthropic para generar la respuesta. Anthropic procesa estos datos como encargado y, según sus políticas comerciales, no los utiliza para entrenar sus modelos.
 
@@ -118,7 +119,7 @@ Si accedes al Servicio desde la Unión Europea, cumplimos con la **Política de 
 
 ## 8. Cookies y tecnologías similares
 
-Usamos cookies estrictamente necesarias para mantener tu sesión iniciada (autenticación). Los videos de YouTube se incrustan a través del dominio de privacidad mejorada **youtube-nocookie.com**, que reduce las cookies que YouTube coloca hasta que reproduces un video. Cuando reproduces un video, Google/YouTube puede establecer cookies conforme a la Política de Privacidad de Google. Además, usamos el píxel de Meta para medir la efectividad de nuestras campañas publicitarias; puedes limitar las cookies de publicidad desde la configuración de tu navegador.
+Usamos cookies estrictamente necesarias para mantener tu sesión iniciada (autenticación). Los videos de YouTube se incrustan a través del dominio de privacidad mejorada **youtube-nocookie.com**, que reduce las cookies que YouTube coloca hasta que reproduces un video. Cuando reproduces un video, Google/YouTube puede establecer cookies conforme a la Política de Privacidad de Google. Además, usamos el píxel de Meta y la etiqueta de Google Ads para medir la efectividad de nuestras campañas publicitarias; puedes limitar las cookies de publicidad desde la configuración de tu navegador.
 
 ---
 

@@ -135,6 +135,14 @@ const clientSchema = z.object({
   // ID del píxel de Meta (medición de campañas). Vacío = píxel apagado
   // (no se inyecta fbevents.js y fbqTrack no-opea).
   NEXT_PUBLIC_META_PIXEL_ID: z.string().default(""),
+  // ID de Google Ads (gtag.js, formato AW-XXXXXXXXX). Default = la cuenta del
+  // fundador, así la etiqueta queda viva al desplegar sin tocar Vercel. Vacío
+  // = apagado (no se inyecta gtag.js y gtagConversion no-opea).
+  NEXT_PUBLIC_GOOGLE_ADS_ID: z.string().default("AW-18235038334"),
+  // Etiqueta de la conversión de COMPRA en Google Ads (la parte tras la "/":
+  // 'AW-XXXX/AbC-D_efG'). Sin ella no se dispara conversión de compra (un
+  // send_to sin etiqueta no se atribuye a ninguna acción → inútil).
+  NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL: z.string().default(""),
 });
 
 /** Variables expuestas al cliente (deben empezar con NEXT_PUBLIC_). */
@@ -143,6 +151,9 @@ const clientEnv = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
   NEXT_PUBLIC_META_PIXEL_ID: process.env.NEXT_PUBLIC_META_PIXEL_ID,
+  NEXT_PUBLIC_GOOGLE_ADS_ID: process.env.NEXT_PUBLIC_GOOGLE_ADS_ID,
+  NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL:
+    process.env.NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL,
 };
 
 // No validar durante `next build`: el build NO necesita los secretos de runtime
