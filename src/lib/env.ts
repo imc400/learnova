@@ -140,9 +140,12 @@ const clientSchema = z.object({
   // = apagado (no se inyecta gtag.js y gtagConversion no-opea).
   NEXT_PUBLIC_GOOGLE_ADS_ID: z.string().default("AW-18235038334"),
   // Etiqueta de la conversión de COMPRA en Google Ads (la parte tras la "/":
-  // 'AW-XXXX/AbC-D_efG'). Sin ella no se dispara conversión de compra (un
-  // send_to sin etiqueta no se atribuye a ninguna acción → inútil).
-  NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL: z.string().default(""),
+  // 'AW-XXXX/AbC-D_efG'). Default = la acción "Compra" del fundador, así la
+  // conversión queda viva al desplegar. Vacío = no se dispara (un send_to
+  // sin etiqueta no se atribuye a ninguna acción → inútil).
+  NEXT_PUBLIC_GOOGLE_ADS_PURCHASE_LABEL: z
+    .string()
+    .default("zid3CJ-E7r0cEP60kvdD"),
 });
 
 /** Variables expuestas al cliente (deben empezar con NEXT_PUBLIC_). */
