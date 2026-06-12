@@ -47,7 +47,7 @@ async function usedClassMinutes(
   const [used] = await db
     .select({
       sec: sql<number>`coalesce(sum(${liveSessions.durationSec}) filter (where ${liveSessions.status} in ('completed', 'missed')), 0)::int`,
-      inProgressSec: sql<number>`coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), ${MAX_CLASS_MINUTES * 60})) filter (where ${liveSessions.status} = 'in_progress'), 0)::int`,
+      inProgressSec: sql<number>`coalesce(sum(least(extract(epoch from now() - ${liveSessions.startedAt}), ${MAX_CLASS_MINUTES * 60}::int)) filter (where ${liveSessions.status} = 'in_progress'), 0)::int`,
     })
     .from(liveSessions)
     .where(and(...conds));

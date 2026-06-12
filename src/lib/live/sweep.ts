@@ -42,9 +42,12 @@ export async function sweepOrphanSessions(opts?: {
       // Duración REAL estimada: epoch desde startedAt (fallback createdAt),
       // cap al máximo del tipo de sesión. summarize-class la afina después
       // con la duración exacta de ElevenLabs si hay transcripción.
+      // ::int en los params del CASE: postgres.js los manda sin tipo y dos
+      // ramas unknown resuelven a text → `LEAST(numeric, text)` = 42804 y
+      // TODO clic de clase moría (fallo real en la demo universidad).
       durationSec: sql`least(
         extract(epoch from now() - coalesce(${liveSessions.startedAt}, ${liveSessions.createdAt})),
-        case when ${liveSessions.kind} = 'induction' then ${MAX_INDUCTION_SECONDS} else ${MAX_CLASS_SECONDS} end
+        case when ${liveSessions.kind} = 'induction' then ${MAX_INDUCTION_SECONDS}::int else ${MAX_CLASS_SECONDS}::int end
       )::int`,
       updatedAt: new Date(),
     })
