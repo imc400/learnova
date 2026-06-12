@@ -139,6 +139,10 @@ function AulaInner({
       startedAtRef.current = startedAtRef.current ?? Date.now();
       reconnectAttemptsRef.current = 0;
       setReconnecting(false);
+      // El SDK puede emitir un error transitorio ANTES de conectar (p. ej.
+      // mientras el navegador muestra el prompt del micrófono): si al final
+      // la conexión triunfa, ese mensaje rojo era falso — se limpia aquí.
+      setError(null);
       if (props?.conversationId) {
         conversationIdRef.current = props.conversationId;
         // Persistir YA: si el alumno refresca o se cae el WiFi, el resumen
@@ -470,7 +474,9 @@ function AulaInner({
         {live && <Badge variant="primary" className="mt-2">en vivo</Badge>}
 
         <div className="mt-4 min-h-6 text-sm font-medium">
-          {error ? (
+          {/* `&& !connected`: el error de arranque solo es real si NO hay
+              conexión viva — conectado, lo que manda es el estado en vivo. */}
+          {error && !connected ? (
             <span className="text-destructive">{error}</span>
           ) : ending ? (
             <span className="flex items-center gap-2 text-muted-foreground">

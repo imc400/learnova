@@ -20,6 +20,19 @@ export default function ErrorPage({
   useEffect(() => {
     // Visibilidad en consola/monitoring; sin PII.
     console.error("[error-boundary]", error.digest ?? error.message);
+    // Alerta ops al fundador (fire-and-forget): el digest llega por correo
+    // al instante — sin esperar a que el usuario reclame (lección de la
+    // demo universidad 2026-06-12, donde el aula murió en silencio).
+    void fetch("/api/ops/client-error", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        digest: error.digest ?? null,
+        path: window.location.pathname,
+        message: error.digest ? null : error.message?.slice(0, 300),
+      }),
+      keepalive: true,
+    }).catch(() => {});
   }, [error]);
 
   return (

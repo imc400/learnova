@@ -93,7 +93,12 @@ export async function startClassAction(
   // sin cerrar) → missed con su duración REAL + resumen/correo de tareas si
   // hubo conversación. El cron sweep-live-sessions hace el mismo barrido
   // global cada 15 min (el correo llega aunque el alumno no vuelva).
-  await sweepOrphanSessions({ userId: user.id });
+  // FAIL-OPEN: es un paso de limpieza — si falla, la clase IGUAL parte (el
+  // 42804 del sweep mató TODOS los clics en la demo universidad 2026-06-12;
+  // un conserje jamás puede volver a cerrar el aula).
+  await sweepOrphanSessions({ userId: user.id }).catch((e) =>
+    console.error("[live] sweep falló (fail-open, la clase parte igual):", e),
+  );
 
   // La inducción es ÚNICA por ruta: una vez completada, no se repite (el
   // alumno debe avanzar; su profesor lo espera en la clase del 40%).
