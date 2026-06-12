@@ -498,3 +498,143 @@ export async function getProBySource(): Promise<ProSourceRow[]> {
   `);
   return rows.map((r) => ({ source: String(r.source), compras: Number(r.compras ?? 0) }));
 }
+
+/* ====================================================================
+   PULSO EN VIVO (pedido del fundador 2026-06-12: "ver todo lo que pasa
+   con los usuarios — cómo avanzan, qué se crea, quién está en clase")
+   ==================================================================== */
+
+export interface LiveNowRow {
+  sessionId: string;
+  email: string | null;
+  name: string | null;
+  pathTitle: string;
+  kind: string;
+  teacher: string | null;
+  elapsedMin: number;
+}
+
+/** Quién está EN EL AULA ahora mismo (in_progress dentro de la ventana viva). */
+export async function getLiveNow(): Promise<LiveNowRow[]> {
+  const rows = await db.execute<Record<string, unknown>>(sql`
+    select ls.id, ls.kind, coalesce(p.email, u.email) as email, p.full_name,
+      lp.title as path_title, ra.name as teacher,
+      ceil(extract(epoch from now() - coalesce(ls.started_at, ls.created_at)) / 60)::int as elapsed_min
+    from live_sessions ls
+    join profiles p on p.id = ls.user_id
+    left join auth.users u on u.id = p.id
+    join learning_paths lp on lp.id = ls.path_id
+    left join route_agents ra on ra.cache_key = coalesce(lp.skeleton_cache_key, 'path-' || lp.id)
+    where ls.status = 'in_progress'
+      and ls.created_at > now() - interval '35 minutes'
+    order by ls.created_at desc
+    limit 20
+  `);
+  return rows.map((r) => ({
+    sessionId: String(r.id),
+    email: (r.email as string) ?? null,
+    name: (r.full_name as string) ?? null,
+    pathTitle: String(r.path_title),
+    kind: String(r.kind),
+    teacher: (r.teacher as string) ?? null,
+    elapsedMin: Number(r.elapsed_min ?? 0),
+  }));
+}
+
+export interface RecentClassRow {
+  sessionId: string;
+  email: string | null;
+  pathTitle: string;
+  kind: string;
+  status: string;
+  teacher: string | null;
+  durationMin: number;
+  hasSummary: boolean;
+  endedAt: string | null;
+}
+
+/** Últimas clases (terminadas o perdidas) con duración real y si hubo resumen. */
+export async function getRecentClasses(limit = 12): Promise<RecentClassRow[]> {
+  const rows = await db.execute<Record<string, unknown>>(sql`
+    select ls.id, ls.kind, ls.status, ls.duration_sec, ls.ended_at,
+      (ls.summary is not null) as has_summary,
+      coalesce(p.email, u.email) as email, lp.title as path_title, ra.name as teacher
+    from live_sessions ls
+    join profiles p on p.id = ls.user_id
+    left join auth.users u on u.id = p.id
+    join learning_paths lp on lp.id = ls.path_id
+    left join route_agents ra on ra.cache_key = coalesce(lp.skeleton_cache_key, 'path-' || lp.id)
+    where ls.status in ('completed', 'missed')
+    order by coalesce(ls.ended_at, ls.updated_at) desc
+    limit ${limit}
+  `);
+  return rows.map((r) => ({
+    sessionId: String(r.id),
+    email: (r.email as string) ?? null,
+    pathTitle: String(r.path_title),
+    kind: String(r.kind),
+    status: String(r.status),
+    teacher: (r.teacher as string) ?? null,
+    durationMin: Math.ceil(Number(r.duration_sec ?? 0) / 60),
+    hasSummary: Boolean(r.has_summary),
+    endedAt: r.ended_at ? String(r.ended_at) : null,
+  }));
+}
+
+export interface TodayPulse {
+  signupsToday: number;
+  pathsToday: number;
+  lessonsToday: number;
+  activeUsersToday: number;
+  classesToday: number;
+  classMinutesToday: number;
+  topToday: { email: string | null; lessons: number }[];
+}
+
+/** El día de HOY (hora Chile) en una mirada: quién hizo qué. */
+export async function getTodayPulse(): Promise<TodayPulse> {
+  const [row] = await db.execute<Record<string, unknown>>(sql`
+    with hoy as (select (now() at time zone 'America/Santiago')::date as d)
+    select
+      (select count(*) from profiles
+        where (created_at at time zone 'America/Santiago')::date = (select d from hoy)) as signups,
+      (select count(*) from learning_paths
+        where (created_at at time zone 'America/Santiago')::date = (select d from hoy)) as paths,
+      (select count(*) from progress
+        where status = 'completed'
+          and (completed_at at time zone 'America/Santiago')::date = (select d from hoy)) as lessons,
+      (select count(distinct user_id) from progress
+        where status = 'completed'
+          and (completed_at at time zone 'America/Santiago')::date = (select d from hoy)) as active_users,
+      (select count(*) from live_sessions
+        where status in ('completed', 'in_progress')
+          and (created_at at time zone 'America/Santiago')::date = (select d from hoy)) as classes,
+      (select coalesce(sum(duration_sec), 0) / 60 from live_sessions
+        where status = 'completed'
+          and (created_at at time zone 'America/Santiago')::date = (select d from hoy)) as class_minutes
+  `);
+  const top = await db.execute<Record<string, unknown>>(sql`
+    with hoy as (select (now() at time zone 'America/Santiago')::date as d)
+    select coalesce(p.email, u.email) as email, count(*) as lessons
+    from progress pr
+    join profiles p on p.id = pr.user_id
+    left join auth.users u on u.id = p.id
+    where pr.status = 'completed'
+      and (pr.completed_at at time zone 'America/Santiago')::date = (select d from hoy)
+    group by 1
+    order by lessons desc
+    limit 5
+  `);
+  return {
+    signupsToday: Number(row?.signups ?? 0),
+    pathsToday: Number(row?.paths ?? 0),
+    lessonsToday: Number(row?.lessons ?? 0),
+    activeUsersToday: Number(row?.active_users ?? 0),
+    classesToday: Number(row?.classes ?? 0),
+    classMinutesToday: Number(row?.class_minutes ?? 0),
+    topToday: top.map((r) => ({
+      email: (r.email as string) ?? null,
+      lessons: Number(r.lessons ?? 0),
+    })),
+  };
+}

@@ -26,6 +26,9 @@ import {
   getPaidIntentsWithoutPath,
   getContinuationKpis,
   getProBySource,
+  getLiveNow,
+  getRecentClasses,
+  getTodayPulse,
 } from "@/server/queries/admin";
 import {
   adminReplayPathAction,
@@ -80,6 +83,12 @@ export default async function AdminPage() {
       getContinuationKpis().catch(() => null),
       getProBySource().catch(() => []),
     ]);
+  // Pulso en vivo (pedido del fundador: ver QUIÉN está en clase y qué pasó hoy).
+  const [liveNow, recentClasses, pulse] = await Promise.all([
+    getLiveNow().catch(() => []),
+    getRecentClasses().catch(() => []),
+    getTodayPulse().catch(() => null),
+  ]);
 
   const kpiCards = [
     { icon: Users, label: "Usuarios", value: kpis.usersTotal, sub: `+${kpis.users7d} esta semana` },
@@ -161,6 +170,131 @@ export default async function AdminPage() {
           </div>
         ))}
       </div>
+
+      {/* EN EL AULA AHORA: quién está hablando con su profesor en este momento */}
+      {liveNow.length > 0 && (
+        <section className="mt-6 rounded-xl border-2 border-primary/50 bg-primary/5 p-5">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+            <span className="relative flex size-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
+              <span className="relative inline-flex size-2.5 rounded-full bg-primary" />
+            </span>
+            En el aula AHORA ({liveNow.length})
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {liveNow.map((s) => (
+              <li
+                key={s.sessionId}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-card p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {s.name ?? s.email ?? "—"}{" "}
+                    <span className="text-xs text-muted-foreground">({s.email ?? "sin correo"})</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {s.kind === "induction" ? "Clase de bienvenida" : "Clase completa"}
+                    {s.teacher ? ` con ${s.teacher}` : ""} · {s.pathTitle}
+                  </p>
+                </div>
+                <span className="font-display text-lg font-bold tabular-nums text-primary">
+                  {s.elapsedMin} min
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* PULSO DE HOY: el día en una mirada (hora Chile) */}
+      {pulse && (
+        <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+            <Activity className="size-4 text-primary" /> Pulso de hoy
+          </h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {[
+              { label: "Registros", value: pulse.signupsToday },
+              { label: "Rutas creadas", value: pulse.pathsToday },
+              { label: "Lecciones completadas", value: pulse.lessonsToday },
+              { label: "Usuarios estudiando", value: pulse.activeUsersToday },
+              { label: "Clases en vivo", value: pulse.classesToday },
+              { label: "Min hablados", value: pulse.classMinutesToday },
+            ].map((m) => (
+              <div key={m.label} className="rounded-lg border border-border bg-card p-3">
+                <p className="font-display text-xl font-bold tabular-nums">{m.value}</p>
+                <p className="text-[11px] text-muted-foreground">{m.label}</p>
+              </div>
+            ))}
+          </div>
+          {pulse.topToday.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Más activos hoy
+              </p>
+              <ul className="mt-1.5 flex flex-wrap gap-2">
+                {pulse.topToday.map((t) => (
+                  <li
+                    key={t.email ?? "?"}
+                    className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs"
+                  >
+                    {t.email ?? "—"} · <strong className="tabular-nums">{t.lessons}</strong>{" "}
+                    {t.lessons === 1 ? "lección" : "lecciones"}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Últimas clases: duración real + si el resumen llegó */}
+      {recentClasses.length > 0 && (
+        <section className="mt-6 rounded-xl border border-border bg-card p-5 shadow-soft">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold">
+            <GraduationCap className="size-4 text-primary" /> Últimas clases
+          </h2>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="py-1.5 pr-3">Cuándo</th>
+                  <th className="py-1.5 pr-3">Alumno</th>
+                  <th className="py-1.5 pr-3">Ruta · profesor</th>
+                  <th className="py-1.5 pr-3">Tipo</th>
+                  <th className="py-1.5 pr-3 text-right">Min</th>
+                  <th className="py-1.5">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentClasses.map((c) => (
+                  <tr key={c.sessionId} className="border-b border-border/50">
+                    <td className="py-1.5 pr-3 whitespace-nowrap text-xs text-muted-foreground">
+                      {c.endedAt ? fmtDate(c.endedAt) : "—"}
+                    </td>
+                    <td className="max-w-[180px] truncate py-1.5 pr-3">{c.email ?? "—"}</td>
+                    <td className="max-w-[240px] truncate py-1.5 pr-3 text-xs">
+                      {c.pathTitle}
+                      {c.teacher ? ` · ${c.teacher}` : ""}
+                    </td>
+                    <td className="py-1.5 pr-3 text-xs">
+                      {c.kind === "induction" ? "Bienvenida" : "Clase"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">{c.durationMin}</td>
+                    <td className="py-1.5 text-xs">
+                      {c.status === "completed" ? (
+                        <span className="text-primary">completada{c.hasSummary ? " · resumen ✓" : ""}</span>
+                      ) : (
+                        <span className="text-muted-foreground">se cortó (barrida)</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Salud operativa: cuota YouTube + costo IA + reconciliación a demanda */}
       <section className="mt-8 rounded-xl border border-border bg-card p-5 shadow-soft">
