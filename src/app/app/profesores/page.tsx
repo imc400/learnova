@@ -11,6 +11,7 @@ import {
   progress,
   modules,
   lessons,
+  profiles,
 } from "@/db/schema";
 import { getEntitlement, proPeriodWindow } from "@/lib/subscription";
 import { startClassAction } from "@/server/actions/live";
@@ -129,6 +130,15 @@ export default async function ProfesoresPage() {
   const totalByPath = new Map(totals.map((r) => [r.pathId, Number(r.total)]));
 
   const { isPro } = await getEntitlement(user.id);
+  // Admin = mismo trato que da el servidor (startClassAction lo exime de
+  // avance y cupos): sin esto la UI le mostraba el candado del 40% aunque
+  // el clic igual funcionaría (visto por el fundador antes de su demo).
+  const [meRow] = await db
+    .select({ isAdmin: profiles.isAdmin })
+    .from(profiles)
+    .where(eq(profiles.id, user.id))
+    .limit(1);
+  const isAdmin = !!meRow?.isAdmin;
 
   // Ventana del pool Pro: UNA sola fuente de verdad (proPeriodWindow) — la
   // misma que aplica startClassAction. La UI jamás muestra un saldo distinto
@@ -189,9 +199,12 @@ export default async function ProfesoresPage() {
             const pct = total > 0 ? Math.round(((doneByPath.get(p.id) ?? 0) / total) * 100) : 0;
             // BÁSICO: solo la clase del VIAJE (≥40% de avance) y con cupo de
             // ruta. PRO: libre mientras tenga minutos (ruta o pool mensual).
-            const canClass = isPro
-              ? routeLeft > 0 || proMonthLeft > 0
-              : pct >= 40 && routeLeft > 0;
+            // ADMIN: siempre (el servidor no le aplica gates ni cupos).
+            const canClass = isAdmin
+              ? true
+              : isPro
+                ? routeLeft > 0 || proMonthLeft > 0
+                : pct >= 40 && routeLeft > 0;
             return (
               <div
                 key={p.id}
@@ -217,9 +230,11 @@ export default async function ProfesoresPage() {
                   <>
                     {/* Ambos cupos a la vista: el de la ruta y el pool Pro. */}
                     <p className="mt-2 text-xs tabular-nums text-muted-foreground">
-                      {isPro
-                        ? `${routeLeft} min en esta ruta · ${proMonthLeft} min de tu pool Pro del mes`
-                        : `${routeLeft} min de clase disponibles en esta ruta`}
+                      {isAdmin
+                        ? "Cuenta admin — clases sin límite"
+                        : isPro
+                          ? `${routeLeft} min en esta ruta · ${proMonthLeft} min de tu pool Pro del mes`
+                          : `${routeLeft} min de clase disponibles en esta ruta`}
                     </p>
                     <form action={startClassAction.bind(null, p.id, "class")} className="mt-3">
                       <SubmitButton size="sm" className="w-full" pendingText="Preparando…">

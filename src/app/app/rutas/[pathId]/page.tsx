@@ -16,7 +16,7 @@ import {
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/db";
-import { moduleRatings, homeworkItems, liveSessions, learningPaths, routeAgents } from "@/db/schema";
+import { moduleRatings, homeworkItems, liveSessions, learningPaths, routeAgents, profiles } from "@/db/schema";
 import { VOICE_POOL } from "@/lib/live/provider";
 import { getEntitlement } from "@/lib/subscription";
 import { env } from "@/lib/env";
@@ -163,12 +163,27 @@ export default async function PathPage({
     path.lessonCount > 0
       ? Math.round((path.completedLessons / path.lessonCount) * 100)
       : 0;
-  const classUnlocked = progressPct >= CLASS_UNLOCK_PCT;
+  // Privilegiados (Pro/admin): el servidor ya los deja tomar clase sin el 40%
+  // (startClassAction) — la UI debe mostrar el MISMO botón que el servidor
+  // permite, o el admin ve un candado falso (pasó en la demo). El gate del
+  // viaje (journeyUnlocked) queda solo-por-avance: decide la card WOW de
+  // bienvenida, que es protagonista también para privilegiados.
+  const [{ isPro }, [meRow]] = await Promise.all([
+    getEntitlement(user.id),
+    db
+      .select({ isAdmin: profiles.isAdmin })
+      .from(profiles)
+      .where(eq(profiles.id, user.id))
+      .limit(1),
+  ]);
+  const privileged = isPro || !!meRow?.isAdmin;
+  const journeyUnlocked = progressPct >= CLASS_UNLOCK_PCT;
+  const classUnlocked = journeyUnlocked || privileged;
 
   // EL MOMENTO WOW: ruta nueva (sin inducción, clase aún bloqueada) → la
   // bienvenida con el profesor EN VIVO es LA card protagonista de la página.
   const showWowInduction =
-    path.lessonCount > 0 && !classUnlocked && !inductionDone;
+    path.lessonCount > 0 && !journeyUnlocked && !inductionDone;
 
   // Profesor real de la ruta (1 por esqueleto canónico — mismo lookup que
   // /app/profesores). Solo se necesita para la card de bienvenida.
