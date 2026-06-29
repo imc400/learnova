@@ -55,6 +55,13 @@ export const metadata: Metadata = {
     title: `${site.name} — ${site.tagline}`,
     description: site.description,
   },
+  // Verificación de dominio de Meta Business (Events Manager): renderiza
+  // <meta name="facebook-domain-verification" …> en el <head> de toda página.
+  verification: {
+    other: {
+      "facebook-domain-verification": "fl3rvw7z0fbjk0k33hj7kzq1lsaxi6",
+    },
+  },
 };
 
 export default function RootLayout({
